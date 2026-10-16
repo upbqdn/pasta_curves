@@ -14,6 +14,15 @@ and this project adheres to Rust's notion of
 - `multicore` feature flag, which enables `glv` and parallel MSM evaluation
   using Rayon.
 
+### Changed
+- Batch normalization uses two independent product chains around one inversion
+  for batches of at least 32 points, and skips redundant endpoint products.
+  `group::Curve::batch_normalize` remains constant-time; the
+  `CurveExt::batch_normalize_vartime` override remains variable-time.
+- Portable `Fp` and `Fq` squaring on x86-64 reduces the low half before adding
+  the high half. Other targets retain classical reduction, and assembly backend
+  selection, multiplication, and public APIs are unchanged.
+
 ## [0.6.1] - 2026-10-09
 ### Added
 - `asm` feature flag, which enables assembly field arithmetic on supported
