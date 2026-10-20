@@ -13,6 +13,8 @@ and this project adheres to Rust's notion of
   hook returns `None`.
 - `multicore` feature flag, which enables `glv` and parallel MSM evaluation
   using Rayon.
+- Added canonical repeated-squaring helpers through
+  `arithmetic::{square_fp_n, square_fq_n}`, with public square counts.
 
 ### Changed
 - Batch normalization uses two independent product chains around one inversion
@@ -22,6 +24,8 @@ and this project adheres to Rust's notion of
 - Portable `Fp` and `Fq` squaring on x86-64 reduces the low half before adding
   the high half. Other targets retain classical reduction, and assembly backend
   selection, multiplication, and public APIs are unchanged.
+- Square-root squaring chains defer canonicalization to chain boundaries while
+  preserving exact root selection and constant-time field arithmetic.
 
 ## [0.6.1] - 2026-10-09
 ### Added
