@@ -1482,6 +1482,7 @@ mod tests {
     use rand_xorshift::XorShiftRng;
     use std::vec::Vec;
 
+    mod decompression;
     mod normalization;
 
     // Built in a `const` context, so that `from_xy_unchecked` staying `const` is
