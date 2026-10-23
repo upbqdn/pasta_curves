@@ -23,7 +23,7 @@ mod asm;
 pub use asm::BACKEND;
 
 // The limb type of the backends and the inversion, the checks of their debug assertions, and the
-// `unroll!` macro, which its users import by path.
+// `unroll_limbs!` macro, which its users import by path.
 mod limbs;
 
 // The constant-time inversion, over the AArch64 assembly blocks or the portable ones.
