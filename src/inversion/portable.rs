@@ -10,14 +10,14 @@
 //! to Lean (`lean/PastaCurves/Portable/`), where `cond_sub`'s translation is proved to meet its
 //! contract; the crate's tests check every block against the same known answers as the assembly
 //! blocks. The code stays within the subset of Rust that Aeneas translates (no `unsafe`, explicit
-//! wrapping arithmetic, and the fixed-length loops unrolled by `unroll!`, so that the translation
+//! wrapping arithmetic, and the fixed-length loops unrolled by `unroll_limbs!`, so that the translation
 //! of those is straight-line code).
 //!
 //! There is no data-dependent branch or memory access: the divstep selects its two outcomes by a
 //! mask, and the rows fold each matrix entry's sign in by a conditional negation under its mask.
 
 use super::InvertBlocks;
-use crate::limbs::{Limbs, unroll};
+use crate::limbs::{Limbs, unroll_limbs};
 
 /// The mask of a word's sign, read as two's complement: all ones for a negative word, else zero.
 #[inline(always)]
@@ -139,7 +139,7 @@ fn mat_mul(m: [u64; 4], n: [u64; 4]) -> [u64; 4] {
 fn negate(x: &[u64; 5], s: u64) -> [u64; 5] {
     let mut out = [0u64; 5];
     let mut carry = s & 1;
-    unroll!(i in [0, 1, 2, 3, 4] {
+    unroll_limbs!(i in [0, 1, 2, 3, 4] {
         (out[i], carry) = adc(x[i] ^ s, 0, carry);
     });
     out
@@ -166,7 +166,7 @@ fn row(x: &[u64; 5], y: &[u64; 5], m0: u64, m1: u64, s0: u64, s1: u64) -> [u64; 
     let y = negate(y, s1);
     let mut out = [0u64; 5];
     let mut carry: u128 = 0;
-    unroll!(i in [0, 1, 2, 3, 4] {
+    unroll_limbs!(i in [0, 1, 2, 3, 4] {
         (out[i], carry) = row_column(carry, x[i], m0, y[i], m1);
     });
     out
@@ -178,7 +178,7 @@ fn row(x: &[u64; 5], y: &[u64; 5], m0: u64, m1: u64, s0: u64, s1: u64) -> [u64; 
 fn add5(x: &[u64; 5], y: &[u64; 5]) -> [u64; 5] {
     let mut out = [0u64; 5];
     let mut carry = 0u64;
-    unroll!(i in [0, 1, 2, 3, 4] {
+    unroll_limbs!(i in [0, 1, 2, 3, 4] {
         (out[i], carry) = adc(x[i], y[i], carry);
     });
     out
@@ -277,12 +277,12 @@ impl InvertBlocks for Backend {
     fn cond_sub(value: &Limbs, modulus: &Limbs) -> Limbs {
         let mut difference = [0u64; 4];
         let mut borrow = 0u64;
-        unroll!(i in [0, 1, 2, 3] {
+        unroll_limbs!(i in [0, 1, 2, 3] {
             (difference[i], borrow) = sbb(value[i], modulus[i], borrow);
         });
         let keep = mask_of_bit(borrow);
         let mut out = [0u64; 4];
-        unroll!(i in [0, 1, 2, 3] {
+        unroll_limbs!(i in [0, 1, 2, 3] {
             out[i] = select(keep, value[i], difference[i]);
         });
         out
