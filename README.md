@@ -12,6 +12,18 @@ If you want to propose "substantial" changes to this crate, please
 
 ## [Documentation](https://docs.rs/pasta_curves)
 
+With `glv`, `CurveExt::try_multiexp_vartime` offers a variable-time MSM backend
+for public scalars and bases. It uses a shared-doubling GLV-Strauss ladder for
+small inputs and signed-Booth GLV buckets with batched affine additions for
+large inputs. It returns `None` when its cost model prefers the caller's
+generic MSM; callers must keep that fallback. Enable `multicore` to evaluate
+independent windows through the Rayon pool; WebAssembly without atomics uses
+the serial implementation. Neither feature changes ordinary constant-time
+scalar multiplication.
+
+The MSM backend reuses the existing split-wNAF tables;
+the optional Eisenstein-orbit and prepared zero-check backends are not included.
+
 ## Minimum Supported Rust Version
 
 Requires Rust **1.85** or higher.
