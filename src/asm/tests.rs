@@ -14,6 +14,66 @@ use super::{Limbs, add, from_mont, sub};
 use super::{mul, sqr_n_mul, square};
 use crate::test_fields::{FIELDS, FP, FQ, Field, ONE, ZERO, p_minus_1};
 
+std::thread_local! {
+    pub(super) static FORCE_PORTABLE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+#[test]
+fn runtime_dispatch_matches_forced_portable() {
+    use group::ff::PrimeField;
+    use rand::{Rng, SeedableRng};
+
+    #[cfg(all(target_arch = "x86_64", not(target_env = "sgx")))]
+    if std::is_x86_feature_detected!("bmi2") && std::is_x86_feature_detected!("adx") {
+        // The standard detector can hide BMI2 when AVX is unavailable, so only check positives.
+        assert!(super::available());
+    }
+    assert_eq!(
+        crate::selected_backend(),
+        if super::available() { super::BACKEND } else { "portable" }
+    );
+    if !super::available() {
+        return;
+    }
+
+    struct Portable;
+    impl Drop for Portable {
+        fn drop(&mut self) {
+            FORCE_PORTABLE.set(false);
+        }
+    }
+
+    macro_rules! check {
+        ($field:ident) => {{
+            use crate::fields::$field;
+            let mut rng = rand_xorshift::XorShiftRng::from_seed([0x5a; 16]);
+            for _ in 0..256 {
+                let lhs = $field::from_raw(core::array::from_fn(|_| rng.next_u64()));
+                let rhs = $field::from_raw(core::array::from_fn(|_| rng.next_u64()));
+                let operations = || (
+                    &lhs + &rhs,
+                    &lhs - &rhs,
+                    &lhs * &rhs,
+                    <$field as group::ff::Field>::square(&lhs),
+                    lhs.sqr_n_mul_runtime(7, &rhs),
+                    lhs.to_repr(),
+                );
+                assert!(super::available());
+                let assembly = operations();
+                FORCE_PORTABLE.set(true);
+                let portable = Portable;
+                assert!(!super::available());
+                assert_eq!(crate::selected_backend(), "portable");
+                assert_eq!(assembly, operations());
+                drop(portable);
+            }
+        }};
+    }
+
+    check!(Fp);
+    check!(Fq);
+}
+
 /// The entry points agree with the portable arithmetic of the field types, on edge operands and on
 /// pseudo-random ones. The portable arithmetic is the field types' inherent `const fn`s, which
 /// never use the backend, applied to the same Montgomery residues. The portable multiplication is
@@ -26,6 +86,9 @@ use crate::test_fields::{FIELDS, FP, FQ, Field, ONE, ZERO, p_minus_1};
 /// cases of its second contract where its accumulator comes nearest to wrapping.
 #[test]
 fn entry_points_match_the_portable_arithmetic() {
+    if !super::available() {
+        return;
+    }
     use rand::{Rng, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -180,6 +243,9 @@ fn sub_known_answers() {
 
 #[test]
 fn mul_known_answers() {
+    if !super::available() {
+        return;
+    }
     for f in FIELDS {
         assert_eq!(mul(&f.r, &f.r, &f.modulus, f.inv), f.r);
         assert_eq!(mul(&f.r, &f.r2, &f.modulus, f.inv), f.r2);
@@ -193,6 +259,9 @@ fn mul_known_answers() {
 
 #[test]
 fn square_known_answers() {
+    if !super::available() {
+        return;
+    }
     for f in FIELDS {
         assert_eq!(square(&f.r, &f.modulus, f.inv), f.r);
         assert_eq!(square(&f.r2, &f.modulus, f.inv), f.r3);
@@ -204,6 +273,9 @@ fn square_known_answers() {
 
 #[test]
 fn sqr_n_mul_known_answers() {
+    if !super::available() {
+        return;
+    }
     for f in FIELDS {
         assert_eq!(sqr_n_mul(&f.r2, 0, &f.r3, &f.modulus, f.inv), f.r4);
         assert_eq!(sqr_n_mul(&f.r, 1, &f.r2, &f.modulus, f.inv), f.r2);
@@ -214,6 +286,9 @@ fn sqr_n_mul_known_answers() {
 
 #[test]
 fn from_mont_known_answers() {
+    if !super::available() {
+        return;
+    }
     for f in FIELDS {
         assert_eq!(from_mont(&f.r, &f.modulus, f.inv), ONE);
         assert_eq!(from_mont(&f.r2, &f.modulus, f.inv), f.r);
@@ -304,6 +379,9 @@ fn run(op: &str, f: &Field, first: &Limbs, second: Option<&Limbs>) -> Limbs {
 /// the code handles them so that a file that gains some needs no other change.
 #[test]
 fn hardware_vectors_match() {
+    if !super::available() {
+        return;
+    }
     // Indexed by routine: MUL, SQR, FROM, ADD, SUB.
     let mut checked = [0usize; 5];
     let mut outside = [0usize; 5];
