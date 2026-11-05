@@ -15,6 +15,7 @@ and this project adheres to Rust's notion of
   using Rayon.
 - Added canonical repeated-squaring helpers through
   `arithmetic::{square_fp_n, square_fq_n}`, with public square counts.
+- Added `pasta_curves::selected_backend()` to report the runtime-selected backend for diagnostics.
 
 ### Changed
 - Batch normalization uses two independent product chains around one inversion
@@ -26,6 +27,10 @@ and this project adheres to Rust's notion of
   selection, multiplication, and public APIs are unchanged.
 - Square-root squaring chains defer canonicalization to chain boundaries while
   preserving exact root selection and constant-time field arithmetic.
+- The `asm` feature detects BMI2 and ADX at run time on x86-64 and falls back to portable field
+  arithmetic when either is missing, including in `no_std` builds. Enabling both target features
+  at compile time removes the check; SGX requires them to select assembly without CPUID.
+  AArch64 assembly remains unconditional.
 
 ## [0.6.1] - 2026-10-09
 ### Added
