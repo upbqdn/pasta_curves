@@ -39,7 +39,7 @@ These curves can be reproducibly obtained
 
 ## Benchmark-only public point decoding
 
-This vendored copy batches public compressed-point decoding in interleaved scalar
+This fork batches public compressed-point decoding in interleaved scalar
 lanes. With `asm` and `sqrt-table`, x86-64 builds additionally use AVX2 when both the
 CPU and operating system support it; BMI2/ADX alone is not sufficient. Other
 targets, unsupported CPUs, and `--cfg pasta_curves_noasm` retain the scalar path.

@@ -238,7 +238,10 @@ pub trait CurveAffine:
     /// Implementations may interleave the arithmetic of independent encodings.
     /// The default uses [`group::GroupEncoding::from_bytes`] for every input.
     fn batch_decode(bytes: &[Self::Repr]) -> alloc::vec::Vec<Option<Self>> {
-        bytes.iter().map(|bytes| Self::from_bytes(bytes).into()).collect()
+        bytes
+            .iter()
+            .map(|bytes| Self::from_bytes(bytes).into())
+            .collect()
     }
 
     /// Gets the coordinates of this point.
