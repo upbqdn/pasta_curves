@@ -850,6 +850,5 @@ pub(crate) trait Avx2Chain: SqrtTableHelpers {
 /// Exercises the AVX2 arithmetic at the limits of its documented bounds:
 /// inputs anywhere below `2p`, including the limb pattern that maximizes every
 /// column sum, which random inputs essentially never produce.
-
 #[cfg(test)]
 mod tests;
