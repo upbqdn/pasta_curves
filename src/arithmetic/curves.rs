@@ -116,6 +116,20 @@ pub trait CurveExt:
         None
     }
 
+    /// Attempts to prepare a doubling-free sum over fixed public bases.
+    ///
+    /// Implementations without a suitable backend return `None`; callers must
+    /// retain a generic fallback. Pasta tables retain about 76 KiB per base.
+    ///
+    /// # Security
+    ///
+    /// Evaluation is variable-time in the scalars, which must be public.
+    fn try_prepare_fixed_base_sum(
+        _bases: &[Self::AffineExt],
+    ) -> Option<Box<dyn PreparedFixedBaseSum<Self>>> {
+        None
+    }
+
     /// Multiplies every point in `points` by the same `scalar`, writing the
     /// corresponding products to `output`.
     ///
@@ -141,6 +155,30 @@ pub trait CurveExt:
         for (point, output) in points.iter().zip(output.iter_mut()) {
             *output = *point * scalar;
         }
+    }
+}
+
+/// A prepared sum over fixed bases, obtained from
+/// [`CurveExt::try_prepare_fixed_base_sum`].
+///
+/// All evaluation methods are variable-time and require public scalars.
+#[cfg(feature = "alloc")]
+pub trait PreparedFixedBaseSum<C: CurveExt>: core::fmt::Debug + Send + Sync {
+    /// The number of prepared bases.
+    fn bases(&self) -> usize;
+
+    /// Computes the sum pairing each scalar with its prepared base.
+    ///
+    /// Omitted trailing scalars are zero. Panics if there are more scalars
+    /// than prepared bases. Scalars must be public.
+    fn sum_vartime(&self, scalars: &[C::ScalarExt]) -> C;
+
+    /// Evaluates each independent sum in order, optionally sharing work.
+    ///
+    /// Returns exactly one result per input vector. Each vector has the same
+    /// length bound and public-input requirement as [`Self::sum_vartime`].
+    fn sum_batch_vartime(&self, scalars: &[&[C::ScalarExt]]) -> alloc::vec::Vec<C> {
+        scalars.iter().map(|s| self.sum_vartime(s)).collect()
     }
 }
 
@@ -333,5 +371,12 @@ mod tests {
         let points = [pallas::Affine::generator()];
         let mut output = [];
         pallas::Point::batch_mul_same_scalar_vartime(&points, &pallas::Scalar::ONE, &mut output);
+    }
+
+    #[cfg(not(feature = "glv"))]
+    #[test]
+    fn unsupported_fixed_base_backend_declines() {
+        assert!(pallas::Point::try_prepare_fixed_base_sum(&[]).is_none());
+        assert!(vesta::Point::try_prepare_fixed_base_sum(&[]).is_none());
     }
 }
