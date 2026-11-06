@@ -179,6 +179,14 @@ pub trait CurveAffine:
     /// The projective form of the curve
     type CurveExt: CurveExt<AffineExt = Self, ScalarExt = <Self as CurveAffine>::ScalarExt>;
 
+    /// Decodes public compressed points, preserving scalar decoding results and order.
+    ///
+    /// Implementations may interleave the arithmetic of independent encodings.
+    /// The default uses [`group::GroupEncoding::from_bytes`] for every input.
+    fn batch_decode(bytes: &[Self::Repr]) -> alloc::vec::Vec<Option<Self>> {
+        bytes.iter().map(|bytes| Self::from_bytes(bytes).into()).collect()
+    }
+
     /// Gets the coordinates of this point.
     ///
     /// Returns None if this is the identity.
