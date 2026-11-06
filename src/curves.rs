@@ -40,6 +40,14 @@ macro_rules! impl_batch_mul_same_scalar_vartime {
         }
 
         #[cfg(feature = "glv")]
+        fn try_multiexp_full_width_is_identity_vartime(
+            scalars: &[Self::ScalarExt],
+            bases: &[Self::AffineExt],
+        ) -> Option<bool> {
+            crate::glv::msm::try_multiexp_full_width_is_identity::<$name>(scalars, bases)
+        }
+
+        #[cfg(feature = "glv")]
         fn try_prepare_fixed_base_sum(
             bases: &[Self::AffineExt],
         ) -> Option<alloc::boxed::Box<dyn crate::arithmetic::PreparedFixedBaseSum<Self>>> {

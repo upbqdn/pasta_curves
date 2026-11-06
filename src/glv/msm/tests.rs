@@ -175,9 +175,8 @@ fn assert_batch_affine_buckets_match_native<C: MsmCurve>(
 
     let original = original_reduce_affine_buckets::<_, false>(points.clone(), offsets.clone())
         .unwrap_or_else(|| panic!("original reducer must succeed in case {case}"));
-    let reduced =
-        reduce_affine_buckets_reusing::<_, false>(&mut points, &mut offsets, scratch)
-            .unwrap_or_else(|| panic!("valid curve points must reduce in case {case}"));
+    let reduced = reduce_affine_buckets_reusing::<_, false>(&mut points, &mut offsets, scratch)
+        .unwrap_or_else(|| panic!("valid curve points must reduce in case {case}"));
     for (actual, expected) in reduced.iter().zip(&original) {
         assert_eq!(
             actual.map(|point| (point.x, point.y)),
@@ -349,11 +348,8 @@ fn forced_window<C: MsmCurve>(terms: usize, width: usize) {
                 0 => C::ScalarExt::ZERO,
                 1 | 2 => C::ScalarExt::ONE,
                 3 => -C::ScalarExt::ONE,
-                _ => {
-                    (C::ScalarExt::from(i + 0x9e3779b97f4a7c15).square()
-                        + C::ScalarExt::from(i))
-                    .square()
-                }
+                _ => (C::ScalarExt::from(i + 0x9e3779b97f4a7c15).square() + C::ScalarExt::from(i))
+                    .square(),
             }
         })
         .collect::<Vec<_>>();
@@ -538,13 +534,34 @@ fn weighted_planner_matches_calibrated_cells() {
             }
         }
     }
-    assert_eq!(glv_multiexp_window_bits::<pallas::Point>(usize::MAX, 8), None);
+    assert_eq!(
+        glv_multiexp_window_bits::<pallas::Point>(usize::MAX, 8),
+        None
+    );
     assert_eq!(
         estimated_weighted_work(usize::MAX, 256, 8, 1, GLV_PLANNER_WEIGHTS),
         None
     );
     assert_eq!(
         estimated_weighted_work(2048, 256, 0, 1, GENERIC_PLANNER_WEIGHTS),
+        None
+    );
+}
+
+#[test]
+fn full_width_identity_declines_noncanonical_montgomery_residues() {
+    let bases = alloc::vec![pallas::Affine::identity(); 4096];
+    let mut scalars = alloc::vec![crate::Fq::ZERO; bases.len()];
+    scalars[0] = crate::Fq([u64::MAX; 4]);
+    assert_eq!(
+        try_multiexp_full_width_is_identity::<pallas::Point>(&scalars, &bases),
+        None
+    );
+    let bases = alloc::vec![vesta::Affine::identity(); 4096];
+    let mut scalars = alloc::vec![crate::Fp::ZERO; bases.len()];
+    scalars[0] = crate::Fp([u64::MAX; 4]);
+    assert_eq!(
+        try_multiexp_full_width_is_identity::<vesta::Point>(&scalars, &bases),
         None
     );
 }
