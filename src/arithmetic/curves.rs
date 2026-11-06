@@ -250,6 +250,15 @@ pub trait CurveAffine:
     /// curve.
     fn from_xy(x: Self::Base, y: Self::Base) -> CtOption<Self>;
 
+    /// Reconstructs coordinates already obtained from a validated point.
+    ///
+    /// Callers must ensure that the coordinates lie on this curve or represent its
+    /// identity. Never use this hook to decode untrusted coordinates.
+    /// The default implementation retains the checked constructor.
+    fn from_xy_unchecked(x: Self::Base, y: Self::Base) -> Self {
+        Self::from_xy(x, y).unwrap()
+    }
+
     /// Returns whether or not this element is on the curve; should
     /// always be true unless an "unchecked" API was used.
     fn is_on_curve(&self) -> Choice;

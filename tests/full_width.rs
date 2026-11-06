@@ -39,3 +39,19 @@ fn montgomery_identity_checks_match_ordinary_msm_on_both_curves() {
     check::<vesta::Point>();
 }
 
+#[test]
+fn trusted_coordinate_reconstruction_matches_checked_constructor() {
+    fn check<C: CurveAffine>() {
+        let mut rng = XorShiftRng::from_seed([23; 16]);
+        for _ in 0..257 {
+            let point = C::CurveExt::random(&mut rng).to_affine();
+            if let Some(coords) = Option::from(point.coordinates()) {
+                let coords: pasta_curves::arithmetic::Coordinates<C> = coords;
+                assert_eq!(<C as CurveAffine>::from_xy_unchecked(*coords.x(), *coords.y()), point);
+            }
+        }
+        assert_eq!(<C as CurveAffine>::from_xy_unchecked(C::Base::ZERO, C::Base::ZERO), C::identity());
+    }
+    check::<pallas::Affine>();
+    check::<vesta::Affine>();
+}
