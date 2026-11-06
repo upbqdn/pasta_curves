@@ -6,6 +6,10 @@ and this project adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Pallas and Vesta batch normalization is faster for larger batches, without
+  changing the constant-time behavior of `group::Curve::batch_normalize`.
+
 
 ## [0.6.1] - 2026-10-09
 ### Added
