@@ -37,6 +37,18 @@ to PLONK.
 These curves can be reproducibly obtained
 [using a curve search utility we’ve published](https://github.com/zcash/pasta).
 
+## Public point batch decoding
+
+`CurveAffine::batch_decode` returns one ordered `Option` per compressed encoding,
+matching individual `GroupEncoding::from_bytes` calls. Inputs must be public:
+decoding may use variable-time arithmetic and square-root table lookups.
+With `sqrt-table`, decoding interleaves independent scalar square-root chains.
+With `asm` as well, x86-64 builds additionally use AVX2 when both the CPU and
+operating system support it, including enabled XMM/YMM state; BMI2/ADX alone is
+not sufficient. Other targets, unsupported CPUs, and `--cfg pasta_curves_noasm`
+retain scalar decoding. Existing constant-time operations are unchanged.
+
+
 ## License
 
 Licensed under either of
