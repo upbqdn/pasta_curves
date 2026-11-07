@@ -6,6 +6,10 @@ and this project adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `CurveAffine::from_xy_unchecked`, a defaulted reconstruction hook for
+  previously validated coordinates. Existing trait implementations retain
+  checked construction; Pasta curves avoid redundant curve checks.
 
 ## [0.6.1] - 2026-10-09
 ### Added
