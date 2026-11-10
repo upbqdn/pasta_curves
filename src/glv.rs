@@ -94,6 +94,8 @@ pub(crate) mod fixed_base;
 
 pub(crate) mod msm;
 
+// The sealed trait is unnameable outside the crate, so its crate-private AVX2 types stay hidden.
+#[allow(private_interfaces)]
 mod private {
     use crate::arithmetic::{CurveAffine, CurveExt};
 
@@ -115,19 +117,126 @@ mod private {
         /// about 85ns against 4ns, and a windowed ladder does one such lookup
         /// per addition.
         fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt;
+
+        /// Converts a field element to radix 2^29 for AVX2 chord additions.
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            target_feature = "avx2",
+            not(pasta_curves_noasm)
+        ))]
+        fn to29(x: &AffineBase<Self>) -> crate::arithmetic::avx2_chord::Limbs29;
+
+        /// Converts a radix-2^29 value back to the affine field.
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            target_feature = "avx2",
+            not(pasta_curves_noasm)
+        ))]
+        fn from29(x: &crate::arithmetic::avx2_chord::Limbs29) -> AffineBase<Self>;
+
+        /// Negates a radix-2^29 value.
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            target_feature = "avx2",
+            not(pasta_curves_noasm)
+        ))]
+        fn neg29(
+            x: &crate::arithmetic::avx2_chord::Limbs29,
+        ) -> crate::arithmetic::avx2_chord::Limbs29;
+
+        /// Evaluates one level of AVX2 chord additions.
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            target_feature = "avx2",
+            not(pasta_curves_noasm)
+        ))]
+        fn chord_level29(
+            n: usize,
+            pair: impl Fn(usize) -> (usize, usize, usize),
+            points: &[crate::arithmetic::avx2_chord::Point29],
+            next: &mut [crate::arithmetic::avx2_chord::Point29],
+            scratch: &mut crate::arithmetic::avx2_chord::ChordScratch,
+        ) -> Option<()>;
     }
 
-    impl Sealed for crate::pallas::Point {
-        fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt {
-            crate::pallas::Affine::from_xy_unchecked(x, y)
-        }
-    }
+    macro_rules! impl_sealed {
+        ($curve:ident) => {
+            impl Sealed for crate::$curve::Point {
+                fn affine_from_xy_unchecked(
+                    x: AffineBase<Self>,
+                    y: AffineBase<Self>,
+                ) -> Self::AffineExt {
+                    crate::$curve::Affine::from_xy_unchecked(x, y)
+                }
 
-    impl Sealed for crate::vesta::Point {
-        fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt {
-            crate::vesta::Affine::from_xy_unchecked(x, y)
-        }
+                #[cfg(all(
+                    feature = "asm",
+                    feature = "sqrt-table",
+                    target_arch = "x86_64",
+                    target_feature = "avx2",
+                    not(pasta_curves_noasm)
+                ))]
+                fn to29(x: &AffineBase<Self>) -> crate::arithmetic::avx2_chord::Limbs29 {
+                    use crate::arithmetic::avx2_chord::Avx2ChordField;
+                    crate::arithmetic::avx2_chord::Limbs29::from_limbs(&x.chord_limbs())
+                }
+
+                #[cfg(all(
+                    feature = "asm",
+                    feature = "sqrt-table",
+                    target_arch = "x86_64",
+                    target_feature = "avx2",
+                    not(pasta_curves_noasm)
+                ))]
+                fn from29(x: &crate::arithmetic::avx2_chord::Limbs29) -> AffineBase<Self> {
+                    use crate::arithmetic::avx2_chord::Avx2ChordField;
+                    AffineBase::<Self>::from_chord_limbs(x.to_limbs())
+                }
+
+                #[cfg(all(
+                    feature = "asm",
+                    feature = "sqrt-table",
+                    target_arch = "x86_64",
+                    target_feature = "avx2",
+                    not(pasta_curves_noasm)
+                ))]
+                fn neg29(
+                    x: &crate::arithmetic::avx2_chord::Limbs29,
+                ) -> crate::arithmetic::avx2_chord::Limbs29 {
+                    use crate::arithmetic::avx2_chord::Avx2ChordField;
+                    x.neg(&AffineBase::<Self>::modulus29())
+                }
+
+                #[cfg(all(
+                    feature = "asm",
+                    feature = "sqrt-table",
+                    target_arch = "x86_64",
+                    target_feature = "avx2",
+                    not(pasta_curves_noasm)
+                ))]
+                fn chord_level29(
+                    n: usize,
+                    pair: impl Fn(usize) -> (usize, usize, usize),
+                    points: &[crate::arithmetic::avx2_chord::Point29],
+                    next: &mut [crate::arithmetic::avx2_chord::Point29],
+                    scratch: &mut crate::arithmetic::avx2_chord::ChordScratch,
+                ) -> Option<()> {
+                    use crate::arithmetic::avx2_chord::Avx2ChordField;
+                    AffineBase::<Self>::chord_level(n, pair, points, next, scratch)
+                }
+            }
+        };
     }
+    impl_sealed!(pallas);
+    impl_sealed!(vesta);
 }
 
 /// The affine point $(x, y)$ of `C`, without checking that it is on the
