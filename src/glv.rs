@@ -123,7 +123,6 @@ mod private {
             feature = "asm",
             feature = "sqrt-table",
             target_arch = "x86_64",
-            target_feature = "avx2",
             not(pasta_curves_noasm)
         ))]
         fn to29(x: &AffineBase<Self>) -> crate::arithmetic::avx2_chord::Limbs29;
@@ -133,7 +132,6 @@ mod private {
             feature = "asm",
             feature = "sqrt-table",
             target_arch = "x86_64",
-            target_feature = "avx2",
             not(pasta_curves_noasm)
         ))]
         fn from29(x: &crate::arithmetic::avx2_chord::Limbs29) -> AffineBase<Self>;
@@ -143,7 +141,6 @@ mod private {
             feature = "asm",
             feature = "sqrt-table",
             target_arch = "x86_64",
-            target_feature = "avx2",
             not(pasta_curves_noasm)
         ))]
         fn neg29(
@@ -155,7 +152,6 @@ mod private {
             feature = "asm",
             feature = "sqrt-table",
             target_arch = "x86_64",
-            target_feature = "avx2",
             not(pasta_curves_noasm)
         ))]
         fn chord_level29(
@@ -181,7 +177,6 @@ mod private {
                     feature = "asm",
                     feature = "sqrt-table",
                     target_arch = "x86_64",
-                    target_feature = "avx2",
                     not(pasta_curves_noasm)
                 ))]
                 fn to29(x: &AffineBase<Self>) -> crate::arithmetic::avx2_chord::Limbs29 {
@@ -193,7 +188,6 @@ mod private {
                     feature = "asm",
                     feature = "sqrt-table",
                     target_arch = "x86_64",
-                    target_feature = "avx2",
                     not(pasta_curves_noasm)
                 ))]
                 fn from29(x: &crate::arithmetic::avx2_chord::Limbs29) -> AffineBase<Self> {
@@ -205,7 +199,6 @@ mod private {
                     feature = "asm",
                     feature = "sqrt-table",
                     target_arch = "x86_64",
-                    target_feature = "avx2",
                     not(pasta_curves_noasm)
                 ))]
                 fn neg29(
@@ -219,7 +212,6 @@ mod private {
                     feature = "asm",
                     feature = "sqrt-table",
                     target_arch = "x86_64",
-                    target_feature = "avx2",
                     not(pasta_curves_noasm)
                 ))]
                 fn chord_level29(

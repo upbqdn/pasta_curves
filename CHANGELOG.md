@@ -26,6 +26,9 @@ and this project adheres to Rust's notion of
 - Public point batch decoding uses four-lane AVX2 square-root arithmetic on
   x86-64 with `asm` and `sqrt-table` when runtime CPU and OS state checks permit
   it. Unsupported environments retain the scalar backend.
+- Prepared fixed-base batch sums are faster on x86-64 with AVX2, `asm` and
+  `sqrt-table`. Unsupported CPUs and feature-disabled builds retain scalar
+  evaluation.
 
 ## [0.6.3] - 2026-11-16
 ### Added
