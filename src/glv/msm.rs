@@ -42,7 +42,7 @@ use crate::{pallas, vesta};
 mod tests;
 
 /// Reads affine coordinates, using the identity's zero representation.
-fn affine_xy<C: GlvParams>(point: &C::AffineExt) -> (AffineBase<C>, AffineBase<C>) {
+pub(super) fn affine_xy<C: GlvParams>(point: &C::AffineExt) -> (AffineBase<C>, AffineBase<C>) {
     Option::<crate::arithmetic::Coordinates<C::AffineExt>>::from(point.coordinates())
         .map(|p| (*p.x(), *p.y()))
         .unwrap_or((AffineBase::<C>::ZERO, AffineBase::<C>::ZERO))
@@ -618,6 +618,22 @@ fn window_assignments<C>(
             }
         }
     }
+}
+
+/// Reduce buckets with one Montgomery inversion per tree level. Inputs are
+/// valid nonidentity points on a Pasta curve (a = 0); offsets partition them.
+/// The incomplete pass writes nothing until inversion succeeds. On a zero
+/// denominator, retry the unchanged level with complete formulas. Successful
+/// results are then compacted in place, retaining the input allocation.
+pub(super) fn reduce_affine_buckets<F: VartimeField>(
+    mut points: Vec<AffinePoint<F>>,
+    mut offsets: Vec<usize>,
+) -> Option<Vec<Option<AffinePoint<F>>>> {
+    reduce_affine_buckets_reusing::<F, false>(
+        &mut points,
+        &mut offsets,
+        &mut ReduceScratch::default(),
+    )
 }
 
 /// The existing failure-atomic reducer compacts points in place, so unlike
