@@ -113,17 +113,28 @@ mod private {
         /// about 85ns against 4ns, and a windowed ladder does one such lookup
         /// per addition.
         fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt;
+
+        /// Stored affine coordinates; the identity has coordinates $(0, 0)$.
+        fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>);
     }
 
     impl Sealed for crate::pallas::Point {
         fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt {
             crate::pallas::Affine::from_xy_unchecked(x, y)
         }
+
+        fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
+            point.raw_xy()
+        }
     }
 
     impl Sealed for crate::vesta::Point {
         fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt {
             crate::vesta::Affine::from_xy_unchecked(x, y)
+        }
+
+        fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
+            point.raw_xy()
         }
     }
 }

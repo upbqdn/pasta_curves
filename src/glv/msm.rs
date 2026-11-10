@@ -26,7 +26,9 @@ use maybe_rayon::prelude::*;
 use super::{
     Decomposed, GlvParams, Table, affine_from_xy_unchecked, decompose, private::AffineBase,
 };
-use crate::arithmetic::{CurveAffine, VartimeField};
+#[cfg(test)]
+use crate::arithmetic::CurveAffine;
+use crate::arithmetic::VartimeField;
 #[cfg(test)]
 use crate::{pallas, vesta};
 
@@ -35,9 +37,7 @@ mod tests;
 
 /// Reads affine coordinates, using the identity's zero representation.
 fn affine_xy<C: GlvParams>(point: &C::AffineExt) -> (AffineBase<C>, AffineBase<C>) {
-    Option::<crate::arithmetic::Coordinates<C::AffineExt>>::from(point.coordinates())
-        .map(|p| (*p.x(), *p.y()))
-        .unwrap_or((AffineBase::<C>::ZERO, AffineBase::<C>::ZERO))
+    <C as super::private::Sealed>::affine_xy(point)
 }
 
 /// The cost model starts here for parallel MSMs and above this for serial MSMs.
