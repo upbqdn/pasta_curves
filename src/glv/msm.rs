@@ -1163,19 +1163,24 @@ fn multiexp<C: GlvParams>(
     acc
 }
 
+fn multiexp_base<C: GlvParams>(base: &C::AffineExt) -> MultiexpBase<AffineBase<C>> {
+    let (x, y) = affine_xy::<C>(base);
+    MultiexpBase {
+        x,
+        endo_x: x * AffineBase::<C>::ZETA,
+        y,
+        identity: bool::from(base.is_identity()),
+    }
+}
+
 fn multiexp_bases<C: GlvParams>(bases: &[C::AffineExt]) -> Vec<MultiexpBase<AffineBase<C>>> {
-    bases
-        .iter()
-        .map(|base| {
-            let (x, y) = affine_xy::<C>(base);
-            MultiexpBase {
-                x,
-                endo_x: x * AffineBase::<C>::ZETA,
-                y,
-                identity: bool::from(base.is_identity()),
-            }
-        })
-        .collect()
+    bases.iter().map(multiexp_base::<C>).collect()
+}
+
+fn multiexp_component<C: GlvParams>(
+    scalar: &C::ScalarExt,
+) -> Option<(SignedMagnitude, SignedMagnitude)> {
+    checked_signed_magnitudes(decompose::<C>(scalar))
 }
 
 /// Declines unprofitable input shapes and failed arithmetic guards so callers
@@ -1192,10 +1197,24 @@ pub(crate) fn try_multiexp<C: GlvParams>(
         return Some(result);
     }
     let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
+    // Every window waits for the scalar decompositions and base preparation, so on a pool
+    // they run in parallel instead of idling the other workers.
+    #[cfg(feature = "multicore")]
+    if num_threads > 1 {
+        let (components, bases) = maybe_rayon::join(
+            || {
+                scalars
+                    .par_iter()
+                    .map(multiexp_component::<C>)
+                    .collect::<Option<Vec<_>>>()
+            },
+            || bases.par_iter().map(multiexp_base::<C>).collect::<Vec<_>>(),
+        );
+        return multiexp(&components?, &bases, window_bits, num_threads);
+    }
     let components = scalars
         .iter()
-        .map(decompose::<C>)
-        .map(checked_signed_magnitudes)
+        .map(multiexp_component::<C>)
         .collect::<Option<Vec<_>>>()?;
     let bases = multiexp_bases::<C>(bases);
     multiexp(&components, &bases, window_bits, num_threads)
