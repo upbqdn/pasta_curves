@@ -36,6 +36,8 @@ and this project adheres to Rust's notion of
   AArch64 and ARMv7E-M assembly remain unconditional.
 - The public-input GLV MSM planner weights affine and projective bucket costs
   separately and considers up to two wider windows when selecting a backend.
+- With `multicore`, large GLV MSMs decompose their scalars and prepare their
+  bases in one pass on the Rayon pool instead of on the calling thread.
 
 ## [0.6.3] - 2026-11-16
 ### Added

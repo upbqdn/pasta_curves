@@ -694,3 +694,102 @@ fn weighted_planner_matches_calibrated_cells() {
         None
     );
 }
+
+/// [`try_multiexp`] as it was before it prepared large inputs on the pool: every scalar
+/// decomposition and base preparation on the calling thread.
+#[cfg(feature = "multicore")]
+fn serially_prepared_multiexp<C: GlvParams>(
+    scalars: &[C::ScalarExt],
+    bases: &[C::AffineExt],
+    num_threads: usize,
+) -> Option<C> {
+    if let Some(result) = planned_strauss_multiexp::<C>(scalars, bases, num_threads) {
+        return Some(result);
+    }
+    let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
+    let components = scalars
+        .iter()
+        .map(decompose::<C>)
+        .map(checked_signed_magnitudes)
+        .collect::<Option<Vec<_>>>()?;
+    multiexp(
+        &components,
+        &multiexp_bases::<C>(bases),
+        window_bits,
+        num_threads,
+    )
+}
+
+/// On 1, 2 and 32 workers, below, at and above the GLV threshold (including the ~2,100 terms
+/// of a one-bundle Orchard batch), [`try_multiexp`] matches the serially prepared MSM for random
+/// terms, scattered zero scalars and identity bases, and all-zero or all-identity inputs. The
+/// planner may decline other shapes on some pools, but the Orchard shape must take the GLV MSM.
+#[cfg(feature = "multicore")]
+fn pool_preparation_matches_serial<C: GlvParams>() {
+    const TERMS: usize = 4096;
+    let mut rng = XorShiftRng::from_seed([0x5a; 16]);
+    let random_scalars = (0..TERMS)
+        .map(|_| C::ScalarExt::random(&mut rng))
+        .collect::<Vec<_>>();
+    let random_bases = (0..TERMS)
+        .map(|_| C::random(&mut rng).to_affine_vartime())
+        .collect::<Vec<_>>();
+    let identity = C::identity().to_affine_vartime();
+    let sparse_scalars = (0..TERMS)
+        .map(|i| match i % 3 {
+            0 => C::ScalarExt::ZERO,
+            _ => random_scalars[i],
+        })
+        .collect::<Vec<_>>();
+    let sparse_bases = (0..TERMS)
+        .map(|i| match i % 5 {
+            0 => identity,
+            _ => random_bases[i],
+        })
+        .collect::<Vec<_>>();
+    let zero_scalars = alloc::vec![C::ScalarExt::ZERO; TERMS];
+    let identity_bases = alloc::vec![identity; TERMS];
+    let cases = [
+        ("random", &random_scalars, &random_bases),
+        ("sparse", &sparse_scalars, &sparse_bases),
+        ("zero scalars", &zero_scalars, &random_bases),
+        ("identity bases", &random_scalars, &identity_bases),
+    ];
+    // The planner declines ~2,100 terms on 33 or more workers, so the widest pool is fixed.
+    for workers in [1, 2, 32] {
+        let pool = maybe_rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .expect("the test environment must support a custom worker pool");
+        pool.install(|| {
+            for terms in [
+                MIN_GLV_MULTIEXP_TERMS - 1,
+                MIN_GLV_MULTIEXP_TERMS,
+                MIN_GLV_MULTIEXP_TERMS + 1,
+                2_100,
+                TERMS,
+            ] {
+                for (case, scalars, bases) in cases {
+                    let (scalars, bases) = (&scalars[..terms], &bases[..terms]);
+                    let actual = try_multiexp::<C>(scalars, bases);
+                    assert_eq!(
+                        actual,
+                        serially_prepared_multiexp::<C>(scalars, bases, workers),
+                        "{case}: {terms} terms on {workers} workers"
+                    );
+                    assert!(
+                        terms != 2_100 || actual.is_some(),
+                        "{case}: {terms} terms on {workers} workers must use the GLV MSM"
+                    );
+                }
+            }
+        });
+    }
+}
+
+#[cfg(feature = "multicore")]
+#[test]
+fn pool_preparation_matches_serial_preparation() {
+    pool_preparation_matches_serial::<pallas::Point>();
+    pool_preparation_matches_serial::<vesta::Point>();
+}

@@ -1163,19 +1163,71 @@ fn multiexp<C: GlvParams>(
     acc
 }
 
+fn multiexp_base<C: GlvParams>(base: &C::AffineExt) -> MultiexpBase<AffineBase<C>> {
+    let (x, y) = affine_xy::<C>(base);
+    MultiexpBase {
+        x,
+        endo_x: x * AffineBase::<C>::ZETA,
+        y,
+        identity: bool::from(base.is_identity()),
+    }
+}
+
 fn multiexp_bases<C: GlvParams>(bases: &[C::AffineExt]) -> Vec<MultiexpBase<AffineBase<C>>> {
-    bases
+    bases.iter().map(multiexp_base::<C>).collect()
+}
+
+fn multiexp_component<C: GlvParams>(
+    scalar: &C::ScalarExt,
+) -> Option<(SignedMagnitude, SignedMagnitude)> {
+    checked_signed_magnitudes(decompose::<C>(scalar))
+}
+
+/// The decomposed scalars and prepared bases every window reads, or `None` if a
+/// scalar fails its component guard.
+///
+/// On a pool, one indexed pass writes both straight into their vectors: the
+/// windows wait for this step, and preparing on the caller left the pool asleep.
+/// Collecting `Option`s instead would be unindexed and concatenate the parts
+/// serially on the caller.
+#[allow(clippy::type_complexity)]
+fn multiexp_inputs<C: GlvParams>(
+    scalars: &[C::ScalarExt],
+    bases: &[C::AffineExt],
+    num_threads: usize,
+) -> Option<(
+    Vec<(SignedMagnitude, SignedMagnitude)>,
+    Vec<MultiexpBase<AffineBase<C>>>,
+)> {
+    #[cfg(feature = "multicore")]
+    if num_threads > 1 {
+        use core::sync::atomic::{AtomicBool, Ordering};
+        // A declined scalar gets a placeholder; the flag then declines the whole MSM.
+        let declined = AtomicBool::new(false);
+        let placeholder = SignedMagnitude {
+            negative: false,
+            magnitude: 0,
+        };
+        let inputs = (0..scalars.len())
+            .into_par_iter()
+            .map(|i| {
+                let component = multiexp_component::<C>(&scalars[i]).unwrap_or_else(|| {
+                    declined.store(true, Ordering::Relaxed);
+                    (placeholder, placeholder)
+                });
+                (component, multiexp_base::<C>(&bases[i]))
+            })
+            .unzip();
+        // The pass has joined every job, which orders their stores before this load.
+        return (!declined.load(Ordering::Relaxed)).then_some(inputs);
+    }
+    #[cfg(not(feature = "multicore"))]
+    let _ = num_threads;
+    let components = scalars
         .iter()
-        .map(|base| {
-            let (x, y) = affine_xy::<C>(base);
-            MultiexpBase {
-                x,
-                endo_x: x * AffineBase::<C>::ZETA,
-                y,
-                identity: bool::from(base.is_identity()),
-            }
-        })
-        .collect()
+        .map(multiexp_component::<C>)
+        .collect::<Option<Vec<_>>>()?;
+    Some((components, multiexp_bases::<C>(bases)))
 }
 
 /// Declines unprofitable input shapes and failed arithmetic guards so callers
@@ -1192,11 +1244,6 @@ pub(crate) fn try_multiexp<C: GlvParams>(
         return Some(result);
     }
     let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
-    let components = scalars
-        .iter()
-        .map(decompose::<C>)
-        .map(checked_signed_magnitudes)
-        .collect::<Option<Vec<_>>>()?;
-    let bases = multiexp_bases::<C>(bases);
+    let (components, bases) = multiexp_inputs::<C>(scalars, bases, num_threads)?;
     multiexp(&components, &bases, window_bits, num_threads)
 }
