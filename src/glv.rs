@@ -118,6 +118,9 @@ mod private {
         /// per addition.
         fn affine_from_xy_unchecked(x: AffineBase<Self>, y: AffineBase<Self>) -> Self::AffineExt;
 
+        /// Stored affine coordinates; the identity has coordinates $(0, 0)$.
+        fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>);
+
         /// Converts a field element to radix 2^29 for AVX2 chord additions.
         #[cfg(all(
             feature = "asm",
@@ -171,6 +174,10 @@ mod private {
                     y: AffineBase<Self>,
                 ) -> Self::AffineExt {
                     crate::$curve::Affine::from_xy_unchecked(x, y)
+                }
+
+                fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
+                    point.raw_xy()
                 }
 
                 #[cfg(all(
