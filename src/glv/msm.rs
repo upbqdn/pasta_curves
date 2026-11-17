@@ -82,9 +82,8 @@ const MAX_PARALLEL_STRAUSS_TERMS: usize = 66;
 /// Each GLV decomposition component has magnitude strictly below `2^127`.
 pub(super) const GLV_COMPONENT_BITS: usize = 127;
 
-/// Estimated work of a signed-Booth MSM, in point operations on its critical
-/// path. Every operation counts the same, so values compare two plans but do
-/// not predict time.
+/// Estimated critical-path work of a signed-Booth MSM, weighted by backend.
+/// Values compare plans but do not predict time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct BoothWork(usize);
 
@@ -98,27 +97,27 @@ fn estimated_signed_booth_work(
     scalar_bits: usize,
     window_bits: usize,
     num_threads: usize,
+    weights: PlannerWeights,
 ) -> Option<BoothWork> {
     let windows = scalar_bits.checked_div(window_bits)?.checked_add(1)?;
     let bucket_shift = u32::try_from(window_bits.checked_sub(1)?).ok()?;
     let buckets = 1usize.checked_shl(bucket_shift)?;
+    let visit = |count: usize| count.checked_mul(weights.point_visit);
+    let bucket_adds = |count: usize| count.checked_mul(weights.bucket_addition);
+    let doublings = |count: usize| count.checked_mul(weights.doubling);
 
     if num_threads <= 1 {
-        let point_visits = terms.checked_mul(windows)?;
-        let bucket_additions = buckets.checked_mul(windows)?.checked_mul(2)?;
-        let doublings = window_bits.checked_mul(windows.checked_sub(1)?)?;
-        return Some(BoothWork(
-            point_visits
-                .checked_add(bucket_additions)?
-                .checked_add(doublings)?,
-        ));
+        let work = visit(terms.checked_mul(windows)?)?
+            .checked_add(bucket_adds(buckets.checked_mul(windows)?.checked_mul(2)?)?)?
+            .checked_add(doublings(
+                window_bits.checked_mul(windows.checked_sub(1)?)?,
+            )?)?;
+        return Some(BoothWork(work));
     }
 
-    // Parallel windows have independent accumulators. Estimate the critical
-    // worker's full-window work and the shifts of its highest-cost windows.
     let workers = num_threads.min(windows);
     let waves = windows.div_ceil(workers);
-    let per_window = terms.checked_add(buckets.checked_mul(2)?)?;
+    let per_window = visit(terms)?.checked_add(bucket_adds(buckets.checked_mul(2)?)?)?;
     let mut shift_doublings = 0usize;
     let mut window = windows.checked_sub(1)?;
     for _ in 0..waves {
@@ -131,9 +130,39 @@ fn estimated_signed_booth_work(
     Some(BoothWork(
         per_window
             .checked_mul(waves)?
-            .checked_add(shift_doublings)?,
+            .checked_add(doublings(shift_doublings)?)?,
     ))
 }
+
+/// Backend-specific work weights, in fifths of a doubling. Calibrated on
+/// Apple M4 and AMD Zen 4, 256–65,536 terms and 1–16 workers: GLV's
+/// batched affine visits cost less than the generic projective bucket visits.
+#[derive(Clone, Copy)]
+struct PlannerWeights {
+    point_visit: usize,
+    bucket_addition: usize,
+    doubling: usize,
+}
+
+/// Unit weights preserve the generic window schedule and unweighted reference estimates.
+const UNIT_PLANNER_WEIGHTS: PlannerWeights = PlannerWeights {
+    point_visit: 1,
+    bucket_addition: 1,
+    doubling: 1,
+};
+
+/// The GLV ladder: affine batched point visits, projective bucket sums.
+const GLV_PLANNER_WEIGHTS: PlannerWeights = PlannerWeights {
+    point_visit: 5,
+    bucket_addition: 10,
+    doubling: 5,
+};
+
+const GENERIC_PLANNER_WEIGHTS: PlannerWeights = PlannerWeights {
+    point_visit: 7,
+    bucket_addition: 5,
+    doubling: 5,
+};
 
 /// Floors of `e^k` for `k = 4..=22`.
 ///
@@ -197,8 +226,20 @@ fn multiexp_window_bits<C: GlvParams>(terms: usize, num_threads: usize) -> Optio
 
     let scalar_bits = scalar_repr_bits::<C>()?;
     let next_window_bits = window_bits.checked_add(1)?;
-    let current = estimated_signed_booth_work(terms, scalar_bits, window_bits, num_threads);
-    let next = estimated_signed_booth_work(terms, scalar_bits, next_window_bits, num_threads);
+    let current = estimated_signed_booth_work(
+        terms,
+        scalar_bits,
+        window_bits,
+        num_threads,
+        UNIT_PLANNER_WEIGHTS,
+    );
+    let next = estimated_signed_booth_work(
+        terms,
+        scalar_bits,
+        next_window_bits,
+        num_threads,
+        UNIT_PLANNER_WEIGHTS,
+    );
     Some(
         if matches!((current, next), (Some(current), Some(next)) if next < current) {
             next_window_bits
@@ -208,46 +249,42 @@ fn multiexp_window_bits<C: GlvParams>(terms: usize, num_threads: usize) -> Optio
     )
 }
 
-/// Choose a GLV window only when its estimated work beats the generic MSM.
-/// Compare both the default width and its successor to account for worker waves.
+/// Choose the cheapest weighted GLV width when it is no worse than generic.
+/// Half-width components can favor up to two bits beyond the generic width.
 fn glv_multiexp_window_bits<C: GlvParams>(terms: usize, num_threads: usize) -> Option<usize> {
     if terms < MIN_GLV_MULTIEXP_TERMS || (terms == MIN_GLV_MULTIEXP_TERMS && num_threads <= 1) {
         return (num_threads <= 1 && terms > SERIAL_STRAUSS_MAX_TERMS)
             .then(|| serial_small_window_bits(terms));
     }
-    let generic = estimated_generic_work::<C>(terms, num_threads)?;
-    let (glv, glv_window_bits) = booth_multiexp_estimate::<C>(terms, num_threads)?;
-    (glv < generic).then_some(glv_window_bits)
-}
 
-/// The generic Signed-Booth MSM's estimated work at its default width (see
-/// [`estimated_signed_booth_work`]).
-fn estimated_generic_work<C: GlvParams>(terms: usize, num_threads: usize) -> Option<BoothWork> {
     let window_bits = multiexp_window_bits::<C>(terms, num_threads)?;
-    let scalar_bits = scalar_repr_bits::<C>()?;
-    estimated_signed_booth_work(terms, scalar_bits, window_bits, num_threads)
-}
-
-/// The Signed-Booth GLV backend's cheapest `(work, window width)` over the
-/// candidate widths `w` and `w + 1` (see [`glv_multiexp_window_bits`]).
-fn booth_multiexp_estimate<C: GlvParams>(
-    terms: usize,
-    num_threads: usize,
-) -> Option<(BoothWork, usize)> {
-    let window_bits = multiexp_window_bits::<C>(terms, num_threads)?;
+    let generic = estimated_signed_booth_work(
+        terms,
+        scalar_repr_bits::<C>()?,
+        window_bits,
+        num_threads,
+        GENERIC_PLANNER_WEIGHTS,
+    )?;
     let glv_terms = terms.checked_mul(2)?;
     let mut best: Option<(BoothWork, usize)> = None;
-    for candidate in window_bits..=window_bits.checked_add(1)? {
-        if let Some(work) =
-            estimated_signed_booth_work(glv_terms, GLV_COMPONENT_BITS, candidate, num_threads)
-        {
+    for candidate in window_bits..=window_bits.checked_add(GLV_EXTRA_WINDOW_BITS)? {
+        if let Some(work) = estimated_signed_booth_work(
+            glv_terms,
+            GLV_COMPONENT_BITS,
+            candidate,
+            num_threads,
+            GLV_PLANNER_WEIGHTS,
+        ) {
             if best.is_none_or(|(best_work, _)| work < best_work) {
                 best = Some((work, candidate));
             }
         }
     }
-    best
+    let (glv, glv_window_bits) = best?;
+    (glv <= generic).then_some(glv_window_bits)
 }
+
+const GLV_EXTRA_WINDOW_BITS: usize = 2;
 
 fn current_num_threads() -> usize {
     #[cfg(all(

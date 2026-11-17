@@ -30,6 +30,10 @@ and this project adheres to Rust's notion of
   `sqrt-table`. Unsupported CPUs and feature-disabled builds retain scalar
   evaluation.
 
+### Changed
+- The public-input GLV MSM planner weights affine and projective bucket costs
+  separately and considers up to two wider windows when selecting a backend.
+
 ## [0.6.3] - 2026-11-16
 ### Added
 - An ARMv7E-M assembly backend for the `asm` feature flag on the
