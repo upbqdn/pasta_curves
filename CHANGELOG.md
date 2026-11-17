@@ -18,6 +18,7 @@ and this project adheres to Rust's notion of
   reusable fixed-base sums for public scalars. The `glv` feature enables
   doubling-free Pallas and Vesta evaluation and batched affine reduction;
   callers must retain a generic fallback when preparation returns `None`.
+- Added `pasta_curves::selected_backend()` to report the runtime-selected backend for diagnostics.
 
 ### Changed
 - GLV MSMs reuse window and affine-reduction scratch. With `multicore`, each
@@ -29,8 +30,10 @@ and this project adheres to Rust's notion of
 - Prepared fixed-base batch sums are faster on x86-64 with AVX2, `asm` and
   `sqrt-table`. Unsupported CPUs and feature-disabled builds retain scalar
   evaluation.
-
-### Changed
+- The `asm` feature detects BMI2 and ADX at run time on x86-64 and falls back to portable field
+  arithmetic when either is missing, including in `no_std` builds. Enabling both target features
+  at compile time removes the check; SGX requires them to select assembly without CPUID.
+  AArch64 and ARMv7E-M assembly remain unconditional.
 - The public-input GLV MSM planner weights affine and projective bucket costs
   separately and considers up to two wider windows when selecting a backend.
 
