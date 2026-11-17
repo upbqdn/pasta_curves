@@ -741,6 +741,79 @@ fn reduce_affine_buckets_reusing<F: VartimeField, const COMPLETE: bool>(
     )
 }
 
+// Uses the level threshold and staged radix-29 tree of the code this was ported from, then this
+// crate's existing failure-atomic scalar reducer for tails and equal-x pairs.
+#[cfg(all(
+    feature = "asm",
+    feature = "sqrt-table",
+    target_arch = "x86_64",
+    not(pasta_curves_noasm)
+))]
+pub(super) fn reduce_affine_buckets29<C: GlvParams>(
+    mut points: Vec<crate::arithmetic::avx2_chord::Point29>,
+    mut offsets: Vec<usize>,
+) -> Option<Vec<Option<AffinePoint<AffineBase<C>>>>> {
+    use crate::arithmetic::avx2_chord::{ChordScratch, Point29};
+
+    // Levels below 32 additions, the ported code's threshold, finish on the scalar path,
+    // independently of eight-lane padding.
+    const AVX2_MIN_LEVEL_ADDITIONS: usize = 32;
+
+    let mut next = Vec::new();
+    let mut next_offsets = Vec::new();
+    let mut pairs = Vec::new();
+    let mut chord = ChordScratch::default();
+    let exceptional = loop {
+        pairs.clear();
+        next.clear();
+        next_offsets.clear();
+        next_offsets.push(0);
+        for range in offsets.windows(2) {
+            let mut input = range[0];
+            while input + 1 < range[1] {
+                pairs.push((input, input + 1, next.len()));
+                next.push(Point29::default());
+                input += 2;
+            }
+            if input < range[1] {
+                next.push(points[input]);
+            }
+            next_offsets.push(next.len());
+        }
+        if pairs.len() < AVX2_MIN_LEVEL_ADDITIONS {
+            break false;
+        }
+        if C::chord_level29(pairs.len(), |i| pairs[i], &points, &mut next, &mut chord).is_none() {
+            // The failed chord level wrote nothing; retry its unchanged
+            // inputs with complete formulas for all remaining levels.
+            break true;
+        }
+        core::mem::swap(&mut points, &mut next);
+        core::mem::swap(&mut offsets, &mut next_offsets);
+    };
+    let mut affine = points
+        .iter()
+        .map(|p| AffinePoint {
+            x: C::from29(&p.x),
+            y: C::from29(&p.y),
+        })
+        .collect();
+    let mut scratch = ReduceScratch::default();
+    if exceptional {
+        reduce_affine_buckets_reusing::<AffineBase<C>, true>(
+            &mut affine,
+            &mut offsets,
+            &mut scratch,
+        )
+    } else {
+        reduce_affine_buckets_reusing::<AffineBase<C>, false>(
+            &mut affine,
+            &mut offsets,
+            &mut scratch,
+        )
+    }
+}
+
 fn sum_buckets<C: GlvParams>(buckets: &[Option<AffinePoint<AffineBase<C>>>]) -> C {
     let mut running = C::identity();
     let mut sum = C::identity();

@@ -8,9 +8,10 @@
 //! # Availability
 //!
 //! This module requires `asm` and `sqrt-table`, and respects `pasta_curves_noasm`.
-//! Entry points check AVX2, XSAVE/OSXSAVE and enabled XMM/YMM state at runtime,
-//! including in no_std builds. Scalar interleaved decoding remains the fallback;
-//! BMI2/ADX availability alone is deliberately not treated as an AVX2 guarantee.
+//! Entry points use cpufeatures to check AVX2 and OS-enabled XMM/YMM state at
+//! runtime, including hosted `no_std` builds. SGX, freestanding
+//! (`target_os = "none"`) and UEFI targets require compile-time AVX2 guarantees
+//! instead. Scalar decoding remains the fallback; BMI2/ADX do not imply AVX2.
 //!
 //! # Arithmetic
 //!
@@ -39,48 +40,24 @@
 #![allow(unused_unsafe)]
 
 use core::arch::x86_64::*;
-use core::sync::atomic::{AtomicU8, Ordering};
 
-static AVX2: AtomicU8 = AtomicU8::new(0);
+cpufeatures::new!(avx2_cpuid, "avx2");
 
 /// Whether this CPU and operating system permit AVX2 instructions.
 #[inline]
 pub(crate) fn available() -> bool {
-    match AVX2.load(Ordering::Relaxed) {
-        1 => false,
-        2 => true,
-        _ => detect(),
-    }
-}
-
-#[cold]
-fn detect() -> bool {
-    // SAFETY: CPUID is baseline on x86-64. XGETBV is called only when XSAVE,
-    // OSXSAVE and AVX are supported; XCR0 must enable both XMM and YMM state.
-    #[allow(unused_unsafe)]
-    let supported = unsafe {
-        let max = __cpuid(0).eax;
-        max >= 7 && {
-            let state = __cpuid(1).ecx;
-            let required = (1 << 26) | (1 << 27) | (1 << 28);
-            state & required == required
-                && _xgetbv(0) & 6 == 6
-                && __cpuid_count(7, 0).ebx & (1 << 5) != 0
-        }
-    };
-    AVX2.store(if supported { 2 } else { 1 }, Ordering::Relaxed);
-    supported
+    avx2_cpuid::get()
 }
 
 use super::fields::SqrtTableHelpers;
 
-const L: usize = 9;
-const BITS: i32 = 29;
-const MASK: u64 = (1 << BITS) - 1;
+pub(super) const L: usize = 9;
+pub(super) const BITS: i32 = 29;
+pub(super) const MASK: u64 = (1 << BITS) - 1;
 
 /// Four field elements, limb-major.
 #[derive(Clone, Copy)]
-struct V([__m256i; L]);
+pub(super) struct V(pub(super) [__m256i; L]);
 
 /// Little-endian 256-bit integers, four per vector, `G` vectors.
 pub(crate) type Lanes<const G: usize> = [[[u64; 4]; 4]; G];
@@ -104,16 +81,20 @@ const fn to29(x: &[u64; 4]) -> [u64; L] {
 
 /// Converts a Pasta modulus to radix 2^29, checking the sparse shape that `mul` and `sqr`
 /// assume.
-const fn pasta_limbs29(p: &[u64; 4]) -> [u64; L] {
+pub(super) const fn pasta_limbs29(p: &[u64; 4]) -> [u64; L] {
     let l = to29(p);
     assert!(l[0] == 1 && l[5] == 0 && l[6] == 0 && l[7] == 0 && l[8] == 1 << 22);
     l
 }
 
-/// Lane-wise Montgomery product.
+/// Lane-wise Montgomery product. The chord backend also uses normalized
+/// operands below 2^261; its wider bounds are documented in `avx2_chord`.
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn mul<const P0: u64, const P1: u64, const P2: u64, const P3: u64>(a: &V, b: &V) -> V {
+pub(super) unsafe fn mul<const P0: u64, const P1: u64, const P2: u64, const P3: u64>(
+    a: &V,
+    b: &V,
+) -> V {
     // SAFETY: callers establish AVX2 availability; lane bounds are documented above.
     unsafe {
         let p = const { pasta_limbs29(&[P0, P1, P2, P3]) };
@@ -676,7 +657,7 @@ unsafe fn sqr<const P0: u64, const P1: u64, const P2: u64, const P3: u64>(a: &V)
 /// Packs four little-endian 256-bit integers (each below 2^261).
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn pack(x: &[[u64; 4]; 4]) -> V {
+pub(super) unsafe fn pack(x: &[[u64; 4]; 4]) -> V {
     // SAFETY: callers establish AVX2 availability; lane bounds are documented above.
     unsafe {
         let l = [to29(&x[0]), to29(&x[1]), to29(&x[2]), to29(&x[3])];

@@ -73,6 +73,16 @@ pub(crate) fn prepare_fixed_base_sum<C: GlvParams>(
 struct FixedBaseSum<C: GlvParams> {
     bases: usize,
     points: Vec<C::AffineExt>,
+    /// Canonical scalar-Montgomery limbs as `[x, zeta x, y, -y]`, cached
+    /// only when runtime detection permits AVX2. Unsupported CPUs keep no
+    /// additional table and use the existing scalar reducer.
+    #[cfg(all(
+        feature = "asm",
+        feature = "sqrt-table",
+        target_arch = "x86_64",
+        not(pasta_curves_noasm)
+    ))]
+    points29: Option<Vec<[crate::arithmetic::avx2_chord::Limbs29; 4]>>,
 }
 
 impl<C: GlvParams> fmt::Debug for FixedBaseSum<C> {
@@ -102,9 +112,37 @@ impl<C: GlvParams> FixedBaseSum<C> {
         }
         let mut points = vec![C::AffineExt::default(); projective.len()];
         C::batch_normalize_vartime(&projective, &mut points);
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            not(pasta_curves_noasm)
+        ))]
+        let points29 = crate::arithmetic::avx2_sqrt::available().then(|| {
+            points
+                .iter()
+                .map(|point| {
+                    let (x, y) = affine_xy::<C>(point);
+                    let y29 = C::to29(&y);
+                    [
+                        C::to29(&x),
+                        C::to29(&(x * AffineBase::<C>::ZETA)),
+                        y29,
+                        C::neg29(&y29),
+                    ]
+                })
+                .collect()
+        });
         FixedBaseSum {
             bases: bases.len(),
             points,
+            #[cfg(all(
+                feature = "asm",
+                feature = "sqrt-table",
+                target_arch = "x86_64",
+                not(pasta_curves_noasm)
+            ))]
+            points29,
         }
     }
 
@@ -119,7 +157,28 @@ impl<C: GlvParams> FixedBaseSum<C> {
         endo: bool,
         mut f: impl FnMut(C::AffineExt, bool),
     ) {
-        let windows = &self.points[base * WINDOWS * MAGNITUDES..][..WINDOWS * MAGNITUDES];
+        self.for_each_term_index(base, negative, half, |index, negate| {
+            let point = self.points[index];
+            let point = if endo {
+                let (x, y) = affine_xy::<C>(&point);
+                affine_from_xy_unchecked::<C>(x * AffineBase::<C>::ZETA, y)
+            } else {
+                point
+            };
+            f(point, negate);
+        });
+    }
+
+    /// Calls `f(index, negate)` for each nonzero signed digit, sharing the
+    /// unchanged recoding between the affine and cached radix-29 tables.
+    fn for_each_term_index(
+        &self,
+        base: usize,
+        negative: bool,
+        half: u128,
+        mut f: impl FnMut(usize, bool),
+    ) {
+        let start = base * WINDOWS * MAGNITUDES;
         let mut carry = 0u128;
         for window in 0..WINDOWS {
             let shift = window * WINDOW_BITS;
@@ -142,14 +201,10 @@ impl<C: GlvParams> FixedBaseSum<C> {
                 continue;
             }
             // `value` is at most `MAGNITUDES`, so the cast is lossless.
-            let point = windows[window * MAGNITUDES + value as usize - 1];
-            let point = if endo {
-                let (x, y) = affine_xy::<C>(&point);
-                affine_from_xy_unchecked::<C>(x * AffineBase::<C>::ZETA, y)
-            } else {
-                point
-            };
-            f(point, negative ^ digit_negative);
+            f(
+                start + window * MAGNITUDES + value as usize - 1,
+                negative ^ digit_negative,
+            );
         }
         debug_assert_eq!(carry, 0, "a half fits in WINDOWS signed windows");
     }
@@ -194,8 +249,71 @@ impl<C: GlvParams> PreparedFixedBaseSum<C> for FixedBaseSum<C> {
 }
 
 impl<C: GlvParams> FixedBaseSum<C> {
+    /// Cached-point reduction. Scalars and coordinates are public.
+    #[cfg(all(
+        feature = "asm",
+        feature = "sqrt-table",
+        target_arch = "x86_64",
+        not(pasta_curves_noasm)
+    ))]
+    fn reduce_sums29(
+        &self,
+        scalars: &[&[C::ScalarExt]],
+        table: &[[crate::arithmetic::avx2_chord::Limbs29; 4]],
+    ) -> Vec<C> {
+        use crate::arithmetic::avx2_chord::Point29;
+
+        let mut points =
+            Vec::with_capacity(scalars.iter().map(|s| s.len()).sum::<usize>() * 2 * WINDOWS);
+        let mut offsets = Vec::with_capacity(scalars.len() + 1);
+        offsets.push(0);
+        for scalars in scalars {
+            assert!(
+                scalars.len() <= self.bases,
+                "at most one scalar per prepared base"
+            );
+            for (base, scalar) in scalars.iter().enumerate() {
+                let ((negative1, half1), (negative2, half2)) = decompose::<C>(scalar);
+                for (negative, half, endo) in [(negative1, half1, false), (negative2, half2, true)]
+                {
+                    self.for_each_term_index(base, negative, half, |index, negate| {
+                        let [x, endo_x, y, neg_y] = &table[index];
+                        // Identity entries are (0, 0), as on the scalar path.
+                        if x.0.iter().chain(&y.0).all(|&limb| limb == 0) {
+                            return;
+                        }
+                        points.push(Point29 {
+                            x: if endo { *endo_x } else { *x },
+                            y: if negate { *neg_y } else { *y },
+                        });
+                    });
+                }
+            }
+            offsets.push(points.len());
+        }
+        match super::msm::reduce_affine_buckets29::<C>(points, offsets) {
+            Some(sums) => sums
+                .into_iter()
+                .map(|sum| match sum {
+                    Some(p) => C::from(affine_from_xy_unchecked::<C>(p.x, p.y)),
+                    None => C::identity(),
+                })
+                .collect(),
+            None => scalars.iter().map(|s| self.sum_vartime(s)).collect(),
+        }
+    }
     /// Reduces the sums of `scalars` together; see [`REDUCE_SUMS`].
     fn reduce_sums(&self, scalars: &[&[C::ScalarExt]]) -> Vec<C> {
+        #[cfg(all(
+            feature = "asm",
+            feature = "sqrt-table",
+            target_arch = "x86_64",
+            not(pasta_curves_noasm)
+        ))]
+        if let Some(table) = &self.points29 {
+            return self.reduce_sums29(scalars, table);
+        }
+
         // One bucket per sum, laid out contiguously for the reducer.
         let mut points =
             Vec::with_capacity(scalars.iter().map(|s| s.len()).sum::<usize>() * 2 * WINDOWS);
