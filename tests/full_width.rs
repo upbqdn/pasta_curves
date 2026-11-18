@@ -64,6 +64,15 @@ fn check<C: CurveExt>() {
                 }
             }
         }
+        let mut cancelling = vec![C::ScalarExt::ZERO; 1024];
+        let a = C::ScalarExt::from(73u64);
+        cancelling[0] = a;
+        cancelling[1] = -a;
+        assert_eq!(
+            C::try_multiexp_full_width_is_identity_vartime(&cancelling, &[bases[0]; 1024]),
+            Some(true),
+            "same-base a·P + (r−a)·P must cancel",
+        );
         assert!(accepted > 0, "the full-width backend must be exercised");
         assert!(C::try_multiexp_full_width_is_identity_vartime(&scalars[..1], &[]).is_none());
     };

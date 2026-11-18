@@ -1206,14 +1206,18 @@ fn multiexp_component<C: GlvParams>(
 /// Collecting `Option`s instead would be unindexed and concatenate the parts
 /// serially on the caller.
 #[allow(clippy::type_complexity)]
-fn multiexp_inputs<C: GlvParams>(
+fn multiexp_inputs<C: GlvParams, F>(
     scalars: &[C::ScalarExt],
     bases: &[C::AffineExt],
     num_threads: usize,
+    component: F,
 ) -> Option<(
     Vec<(SignedMagnitude, SignedMagnitude)>,
     Vec<MultiexpBase<AffineBase<C>>>,
-)> {
+)>
+where
+    F: Fn(&C::ScalarExt) -> Option<(SignedMagnitude, SignedMagnitude)> + Sync,
+{
     #[cfg(feature = "multicore")]
     if num_threads > 1 {
         use core::sync::atomic::{AtomicBool, Ordering};
@@ -1226,7 +1230,7 @@ fn multiexp_inputs<C: GlvParams>(
         let inputs = (0..scalars.len())
             .into_par_iter()
             .map(|i| {
-                let component = multiexp_component::<C>(&scalars[i]).unwrap_or_else(|| {
+                let component = component(&scalars[i]).unwrap_or_else(|| {
                     declined.store(true, Ordering::Relaxed);
                     (placeholder, placeholder)
                 });
@@ -1238,10 +1242,7 @@ fn multiexp_inputs<C: GlvParams>(
     }
     #[cfg(not(feature = "multicore"))]
     let _ = num_threads;
-    let components = scalars
-        .iter()
-        .map(multiexp_component::<C>)
-        .collect::<Option<Vec<_>>>()?;
+    let components = scalars.iter().map(component).collect::<Option<Vec<_>>>()?;
     Some((components, multiexp_bases::<C>(bases)))
 }
 
@@ -1259,7 +1260,8 @@ pub(crate) fn try_multiexp<C: GlvParams>(
         return Some(result);
     }
     let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
-    let (components, bases) = multiexp_inputs::<C>(scalars, bases, num_threads)?;
+    let (components, bases) =
+        multiexp_inputs::<C, _>(scalars, bases, num_threads, multiexp_component::<C>)?;
     multiexp(&components, &bases, window_bits, num_threads)
 }
 
@@ -1276,17 +1278,13 @@ pub(crate) fn try_multiexp_full_width_is_identity<C: FullWidthMsmCurve>(
     let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
     let mut modulus = super::scalar_limbs(&-C::ScalarExt::ONE);
     modulus[0] += 1;
-    let components = scalars
-        .iter()
-        .map(|scalar| {
-            let limbs = C::montgomery_limbs(scalar);
-            if limbs.iter().rev().cmp(modulus.iter().rev()) != core::cmp::Ordering::Less {
-                return None;
-            }
-            checked_signed_magnitudes(super::decompose_limbs::<C>(limbs))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let bases = multiexp_bases::<C>(bases);
+    let (components, bases) = multiexp_inputs::<C, _>(scalars, bases, num_threads, |scalar| {
+        let limbs = C::montgomery_limbs(scalar);
+        if limbs.iter().rev().cmp(modulus.iter().rev()) != core::cmp::Ordering::Less {
+            return None;
+        }
+        checked_signed_magnitudes(super::decompose_limbs::<C>(limbs))
+    })?;
     multiexp::<C>(&components, &bases, window_bits, num_threads)
         .map(|sum| bool::from(sum.is_identity()))
 }

@@ -793,3 +793,17 @@ fn pool_preparation_matches_serial_preparation() {
     pool_preparation_matches_serial::<pallas::Point>();
     pool_preparation_matches_serial::<vesta::Point>();
 }
+
+#[test]
+fn full_width_declines_noncanonical_montgomery_limbs() {
+    fn check<C: FullWidthMsmCurve>(noncanonical: C::ScalarExt) {
+        let scalars = alloc::vec![noncanonical; 1024];
+        let bases = alloc::vec![C::generator().to_affine_vartime(); 1024];
+        assert!(
+            try_multiexp_full_width_is_identity::<C>(&scalars, &bases).is_none(),
+            "noncanonical Montgomery limbs must not reach the GLV decomposition"
+        );
+    }
+    check::<pallas::Point>(crate::Fq([u64::MAX; 4]));
+    check::<vesta::Point>(crate::Fp([u64::MAX; 4]));
+}
