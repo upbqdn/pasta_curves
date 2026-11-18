@@ -37,7 +37,6 @@ use super::{
 #[cfg(test)]
 use crate::arithmetic::CurveAffine;
 use crate::arithmetic::VartimeField;
-#[cfg(test)]
 use crate::{pallas, vesta};
 
 #[cfg(test)]
@@ -46,6 +45,22 @@ mod tests;
 /// Reads affine coordinates, using the identity's zero representation.
 pub(super) fn affine_xy<C: GlvParams>(point: &C::AffineExt) -> (AffineBase<C>, AffineBase<C>) {
     <C as super::private::Sealed>::affine_xy(point)
+}
+/// Raw Montgomery scalar limbs are private to the two Pasta curves.
+pub(crate) trait FullWidthMsmCurve: GlvParams {
+    fn montgomery_limbs(scalar: &Self::ScalarExt) -> [u64; 4];
+}
+
+impl FullWidthMsmCurve for pallas::Point {
+    fn montgomery_limbs(scalar: &Self::ScalarExt) -> [u64; 4] {
+        scalar.0
+    }
+}
+
+impl FullWidthMsmCurve for vesta::Point {
+    fn montgomery_limbs(scalar: &Self::ScalarExt) -> [u64; 4] {
+        scalar.0
+    }
 }
 
 /// The cost model starts here for parallel MSMs and above this for serial MSMs.
@@ -1246,4 +1261,32 @@ pub(crate) fn try_multiexp<C: GlvParams>(
     let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
     let (components, bases) = multiexp_inputs::<C>(scalars, bases, num_threads)?;
     multiexp(&components, &bases, window_bits, num_threads)
+}
+
+/// Checks only identity: raw Montgomery limbs represent R times each scalar.
+/// R is invertible modulo the prime group order, so the sum is zero unchanged.
+pub(crate) fn try_multiexp_full_width_is_identity<C: FullWidthMsmCurve>(
+    scalars: &[C::ScalarExt],
+    bases: &[C::AffineExt],
+) -> Option<bool> {
+    if scalars.len() != bases.len() {
+        return None;
+    }
+    let num_threads = current_num_threads();
+    let window_bits = glv_multiexp_window_bits::<C>(scalars.len(), num_threads)?;
+    let mut modulus = super::scalar_limbs(&-C::ScalarExt::ONE);
+    modulus[0] += 1;
+    let components = scalars
+        .iter()
+        .map(|scalar| {
+            let limbs = C::montgomery_limbs(scalar);
+            if limbs.iter().rev().cmp(modulus.iter().rev()) != core::cmp::Ordering::Less {
+                return None;
+            }
+            checked_signed_magnitudes(super::decompose_limbs::<C>(limbs))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let bases = multiexp_bases::<C>(bases);
+    multiexp::<C>(&components, &bases, window_bits, num_threads)
+        .map(|sum| bool::from(sum.is_identity()))
 }

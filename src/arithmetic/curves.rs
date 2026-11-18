@@ -147,6 +147,18 @@ pub trait CurveExt:
         None
     }
 
+    /// Checks a public full-width MSM for identity without returning its point.
+    ///
+    /// May multiply the sum by an invertible scalar internally, which preserves
+    /// identity. Returns `None` for unsupported shapes or curves; callers must
+    /// retain an ordinary MSM fallback. Variable-time: never use secret inputs.
+    fn try_multiexp_full_width_is_identity_vartime(
+        _scalars: &[Self::ScalarExt],
+        _bases: &[Self::AffineExt],
+    ) -> Option<bool> {
+        None
+    }
+
     /// Attempts to prepare a doubling-free sum over fixed public bases.
     ///
     /// Implementations without a suitable backend return `None`; callers must

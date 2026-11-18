@@ -12,6 +12,10 @@ and this project adheres to Rust's notion of
   multiplication hook for public inputs. The `glv` feature enables optimized
   Pallas and Vesta backends; callers must retain a generic fallback when the
   hook returns `None`.
+- `CurveExt::try_multiexp_full_width_is_identity_vartime`, an optional
+  variable-time identity check for public full-width MSMs. With `glv`, Pallas
+  and Vesta skip per-scalar canonical conversion; unsupported inputs retain
+  the ordinary MSM fallback.
 - `multicore` feature flag, which enables `glv` and parallel MSM evaluation
   using Rayon.
 - `CurveExt::try_prepare_fixed_base_sum` and `PreparedFixedBaseSum`, optional

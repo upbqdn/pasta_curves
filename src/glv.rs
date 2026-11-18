@@ -857,7 +857,11 @@ pub(crate) fn decompose<C>(k: &C::ScalarExt) -> ((bool, u128), (bool, u128))
 where
     C: GlvParams,
 {
-    let kl = scalar_limbs(k);
+    decompose_limbs::<C>(scalar_limbs(k))
+}
+
+/// The same GLV split applied to canonical limbs or a raw Montgomery residue.
+pub(crate) fn decompose_limbs<C: GlvParams>(kl: [u64; 4]) -> ((bool, u128), (bool, u128)) {
     let c1 = round_mul_shift(&C::G1, &kl);
     let c2 = round_mul_shift(&C::G2, &kl);
     // k1 = k - c1*V1A - c2*V2A   (two's complement over 256 bits)
