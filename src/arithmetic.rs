@@ -6,6 +6,8 @@
 
 mod curves;
 mod fields;
+#[cfg(feature = "alloc")]
+mod multiexp;
 
 #[cfg(all(
     feature = "asm",
@@ -26,4 +28,6 @@ pub(crate) mod avx2_chord;
 
 #[cfg(feature = "alloc")]
 pub use curves::*;
+#[cfg(feature = "alloc")]
+pub use multiexp::best_multiexp_vartime;
 pub use fields::*;
