@@ -18,6 +18,7 @@ and this project adheres to Rust's notion of
   reusable fixed-base sums for public bases and scalars. The `glv` feature enables
   doubling-free Pallas and Vesta evaluation and batched affine reduction;
   callers must retain a generic fallback when preparation returns `None`.
+- `pasta_curves::selected_backend()` to report the runtime-selected arithmetic backend.
 
 ### Changed
 - GLV MSMs reuse window and affine-reduction scratch. With `multicore`, each
@@ -30,6 +31,10 @@ and this project adheres to Rust's notion of
 - Public point batch decoding uses four-lane AVX2 square-root arithmetic on
   x86-64 with `asm` and `sqrt-table` when runtime CPU and OS state checks permit
   it. Unsupported environments retain the scalar backend.
+- The `asm` feature detects BMI2 and ADX at run time on x86-64 and falls back to portable
+  field arithmetic when either is missing, including in `no_std` builds. Enabling both
+  target features at compile time removes the check; SGX requires them to select assembly
+  without CPUID. AArch64 assembly remains unconditional.
 
 ## [0.6.3] - 2026-11-16
 ### Added

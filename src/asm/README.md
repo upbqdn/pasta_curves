@@ -48,9 +48,10 @@ With the `asm` feature enabled, backend availability and restrictions are:
 - **AArch64:** selected on `target_arch = "aarch64"`.
 - **x86-64:** selected on non-Apple `target_arch = "x86_64"` with 64-bit pointers. `mul`,
   `square`, and the routines built on them read limbs through pointers, which rules out the x32
-  ABI. Apple targets reserve `rbp`, leaving too few registers for the squaring blocks. The backend
-  requires BMI2 and ADX at run time (Intel Broadwell / AMD Zen or newer); these CPU features are
-  not checked. `from_mont` needs BMI2 alone.
+  ABI. Apple targets reserve `rbp`, leaving too few registers for the squaring blocks. Outside
+  SGX, field operations check for BMI2 and ADX at run time and use portable Rust when either is
+  missing. Detection is cached without `std` or allocation. Enabling both target features at
+  compile time removes detection; SGX requires them because CPUID is unavailable there.
 - **ARMv7E-M:** selected on 32-bit little-endian `target_arch = "arm"` with
   `target_os = "none"` and `target_abi = "eabihf"`. It is intended for
   `thumbv7em-none-eabihf` (Cortex-M4/M7) and requires Thumb state, Thumb-2, and UMAAL (DSP).
@@ -61,18 +62,18 @@ With the `asm` feature enabled, backend availability and restrictions are:
 
 Outside these gates, the module has no backend. To select portable arithmetic even when a gate
 matches, pass `--cfg pasta_curves_noasm` through `RUSTFLAGS` or `rustflags` in `.cargo/config.toml`.
-Code that uses the backend declares its uses under `if_asm_supported!` and its portable fallback
-under `if_asm_unsupported!`; the first expands to its items exactly where the module has a backend,
-and the second exactly where it does not. `pasta_curves::BACKEND` names the result for diagnostics.
+Code declares backend items under `if_asm_supported!` and selects operations through `if_asm!`,
+which includes runtime dispatch. `pasta_curves::BACKEND` names the compiled-in backend;
+`pasta_curves::selected_backend()` reports runtime selection.
 
 Nothing is assembled at build time: the blocks are compiled by the Rust toolchain, so no C
 toolchain is needed. On x86-64, the `asm` feature also enables `cpufeatures` for AVX2 helper
 dispatch. Hosted targets detect AVX2 at runtime; SGX, freestanding and UEFI targets require
 compile-time AVX2 guarantees.
 
-The blocks have no data-dependent branch or memory access, and a release build runs nothing
-else. So the routines' timing should not depend on their operands, unless behaviour of the Rust
-toolchain or platform introduces an unexpected obstacle to that. A debug build also runs the
+The blocks have no data-dependent branch or memory access. Runtime dispatch depends only on
+the CPU, not field operands, so the routines' timing should not depend on operands unless the
+Rust toolchain or platform introduces an unexpected obstacle. A debug build also runs the
 assertions' checks, and debug mode carries no constant-time guarantee. The checks are written
 without data-dependent branches, and pass their words through `core::hint::black_box`, as
 `subtle` does. An inspection of the output of one toolchain (AArch64, Rust 1.96.1) found only
@@ -104,6 +105,10 @@ against known answers, `x · x^-1 = 1`, and the field types' own inverse. Withou
 outside the gated targets, or with `--cfg pasta_curves_noasm`, the backend has no tests to run, and
 the inversion's tests over the portable blocks are the ones that run. `scripts/ci.sh` runs every
 check CI runs.
+
+The runtime-dispatch test forces portable field operations on a thread-local basis and compares
+the results against assembly on deterministic random inputs in both fields. Direct assembly
+tests skip instructions unavailable on the host CPU.
 
 ## Formal verification
 
