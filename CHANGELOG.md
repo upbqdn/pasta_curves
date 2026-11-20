@@ -7,6 +7,13 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Public point batch decoding uses four-lane AVX2 square-root arithmetic on
+  x86-64 with `asm` and `sqrt-table` when runtime CPU and OS state checks permit
+  it. Unsupported environments retain the scalar backend.
+- With `multicore`, large GLV MSMs prepare scalar halves and bases together on
+  the worker pool before evaluating their windows.
+
 ## [0.6.4] - 2026-11-25
 ### Added
 - `multicore` feature flag, which enables `rayon`-based parallelism inside
@@ -21,11 +28,6 @@ and this project adheres to Rust's notion of
 - Improved scalar multiplication performance for
   `pasta_curves::{pallas, vesta}::{Affine, Point}` (via `Mul<Self::Scalar>`, and
   `MulAssign<Self::Scalar>` for `Point`).
-
-### Changed
-- Public point batch decoding uses four-lane AVX2 square-root arithmetic on
-  x86-64 with `asm` and `sqrt-table` when runtime CPU and OS state checks permit
-  it. Unsupported environments retain the scalar backend.
 
 ## [0.6.3] - 2026-11-16
 ### Added

@@ -69,8 +69,8 @@ mod straus;
 
 use alloc::vec::Vec;
 
-use super::booth;
-use bucket::{CachedField, multiexp, multiexp_bases};
+use super::booth::{self, SignedMagnitude};
+use bucket::{CachedField, MultiexpBase, multiexp, multiexp_base, multiexp_bases};
 use plan::{Plan, current_num_threads};
 use straus::straus_multiexp;
 #[cfg(feature = "multicore")]
@@ -79,6 +79,49 @@ use straus::straus_multiexp_jobs;
 pub(super) use bucket::{AffinePoint, reduce_affine_buckets};
 
 use super::{GlvParams, decompose, private::AffineBase};
+#[cfg(feature = "multicore")]
+use maybe_rayon::prelude::*;
+
+/// Prepare decomposed scalars and bases together on the pool before any window starts.
+fn multiexp_inputs<C>(
+    scalars: &[C::ScalarExt],
+    bases: &[C::AffineExt],
+    num_threads: usize,
+) -> Option<(
+    Vec<(SignedMagnitude, SignedMagnitude)>,
+    Vec<MultiexpBase<AffineBase<C>>>,
+)>
+where
+    C: GlvParams,
+{
+    #[cfg(feature = "multicore")]
+    if num_threads > 1 {
+        use core::sync::atomic::{AtomicBool, Ordering};
+
+        let declined = AtomicBool::new(false);
+        let placeholder = SignedMagnitude::from((false, 0));
+        let inputs = (0..scalars.len())
+            .into_par_iter()
+            .map(|i| {
+                let component = booth::checked_signed_magnitudes(decompose::<C>(&scalars[i]))
+                    .unwrap_or_else(|| {
+                        declined.store(true, Ordering::Relaxed);
+                        (placeholder, placeholder)
+                    });
+                (component, multiexp_base::<C>(&bases[i]))
+            })
+            .unzip();
+        return (!declined.load(Ordering::Relaxed)).then_some(inputs);
+    }
+    #[cfg(not(feature = "multicore"))]
+    let _ = num_threads;
+    let components = scalars
+        .iter()
+        .map(decompose::<C>)
+        .map(booth::checked_signed_magnitudes)
+        .collect::<Option<Vec<_>>>()?;
+    Some((components, multiexp_bases::<C>(bases)))
+}
 
 /// Declines unprofitable input shapes and failed arithmetic guards so callers
 /// can retain their generic MSM. Mismatched lengths also decline.
@@ -100,15 +143,10 @@ where
         Plan::Buckets { window_bits } => window_bits,
         Plan::Decline => return None,
     };
-    let components = scalars
-        .iter()
-        .map(decompose::<C>)
-        .map(booth::checked_signed_magnitudes)
-        .collect::<Option<Vec<_>>>();
+    let inputs = multiexp_inputs::<C>(scalars, bases, num_threads);
     // `glv::decompose` keeps both halves below 2^127, so this never declines;
     // if that bound broke, release builds would still fall back safely.
-    debug_assert!(components.is_some(), "a GLV half is 2^127 or larger");
-    let components = components?;
-    let bases = multiexp_bases::<C>(bases);
+    debug_assert!(inputs.is_some(), "a GLV half is 2^127 or larger");
+    let (components, bases) = inputs?;
     multiexp(&components, &bases, window_bits, num_threads)
 }

@@ -221,3 +221,39 @@ fn tls_scratch_reuses_capacity_and_drops_oversized_buffers() {
     .join()
     .unwrap();
 }
+
+#[cfg(feature = "multicore")]
+#[test]
+fn pool_preparation_matches_serial() {
+    fn check<C>()
+    where
+        C: GlvParams,
+        AffineBase<C>: CachedField,
+    {
+        let (scalars, bases) = exceptional_inputs::<C>(2_100);
+        for workers in [1, 2, 8] {
+            let pool = maybe_rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .expect("a custom worker pool is available in the test environment");
+            pool.install(|| {
+                let (components, prepared) =
+                    super::super::multiexp_inputs::<C>(&scalars, &bases, workers)
+                        .expect("GLV components fit in 127 bits");
+                let serial = scalars
+                    .iter()
+                    .map(decompose::<C>)
+                    .map(checked_signed_magnitudes)
+                    .collect::<Option<Vec<_>>>()
+                    .expect("GLV components fit in 127 bits");
+                assert_eq!(components, serial);
+                assert_eq!(
+                    multiexp::<C>(&components, &prepared, 7, workers),
+                    multiexp::<C>(&serial, &multiexp_bases::<C>(&bases), 7, workers)
+                );
+            });
+        }
+    }
+    check::<pallas::Point>();
+    check::<vesta::Point>();
+}
