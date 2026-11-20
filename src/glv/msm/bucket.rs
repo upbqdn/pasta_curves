@@ -484,20 +484,23 @@ where
 }
 
 /// Prepares the bases: coordinates, the $x$ of $\phi(P)$, and the identity flag.
+pub(super) fn multiexp_base<C>(base: &C::AffineExt) -> MultiexpBase<AffineBase<C>>
+where
+    C: GlvParams,
+{
+    let (x, y) = affine_xy::<C>(base);
+    MultiexpBase {
+        x,
+        endo_x: phi_x::<C>(x),
+        y,
+        identity: bool::from(base.is_identity()),
+    }
+}
+
+/// Prepares the bases: coordinates, the $x$ of $\phi(P)$, and the identity flag.
 pub(super) fn multiexp_bases<C>(bases: &[C::AffineExt]) -> Vec<MultiexpBase<AffineBase<C>>>
 where
     C: GlvParams,
 {
-    bases
-        .iter()
-        .map(|base| {
-            let (x, y) = affine_xy::<C>(base);
-            MultiexpBase {
-                x,
-                endo_x: phi_x::<C>(x),
-                y,
-                identity: bool::from(base.is_identity()),
-            }
-        })
-        .collect()
+    bases.iter().map(multiexp_base::<C>).collect()
 }
