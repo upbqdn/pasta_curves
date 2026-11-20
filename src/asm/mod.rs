@@ -16,16 +16,18 @@
 //! Some ARM targets match the gate but lack the required Thumb-2 or DSP
 //! instructions. Pass `--cfg pasta_curves_noasm` through `RUSTFLAGS` or
 //! `rustflags` in `.cargo/config.toml` to select portable arithmetic on those
-//! targets, or on x86-64 CPUs without BMI2 and ADX. On x86-64, the x32 ABI is
-//! excluded because some routines read limbs through pointers, and Apple
-//! targets reserve `rbp`, leaving too few registers for the squaring blocks;
-//! BMI2 and ADX are required at run time and are not checked.
+//! targets. On x86-64, the x32 ABI is excluded because some routines read limbs
+//! through pointers, and Apple targets reserve `rbp`, leaving too few registers
+//! for the squaring blocks. Outside SGX, x86-64 field operations detect BMI2
+//! and ADX at run time and fall back to portable arithmetic when either is
+//! missing. Enabling both target features at compile time removes detection;
+//! SGX requires both because it cannot use CPUID.
 //!
-//! Code that uses the backend does not repeat the gate: it declares its uses
-//! under `if_asm_supported!` and its portable fallback under
-//! `if_asm_unsupported!`; the first expands to its items exactly where the
-//! module has a backend, and the second exactly where it does not. [`BACKEND`]
-//! names the result.
+//! Code that uses the backend declares its items under `if_asm_supported!`
+//! and selects operations through `if_asm!`, which includes runtime dispatch.
+//! The complementary `if_asm_unsupported!` selects items where no backend is
+//! compiled in. [`BACKEND`] names the compiled-in backend; [`selected_backend`]
+//! reports the runtime selection.
 //!
 //! Nothing is assembled at build time: the blocks are compiled by the Rust
 //! toolchain, so no C toolchain is needed. On x86-64, `asm` also enables
@@ -34,10 +36,10 @@
 //!
 //! # Timing
 //!
-//! The blocks have no data-dependent branch or memory access, and a release
-//! build runs nothing else. So the routines' timing should not depend on their
-//! operands, unless behaviour of the Rust toolchain or platform introduces an
-//! unexpected obstacle to that. A debug build also runs the assertions' checks,
+//! The blocks have no data-dependent branch or memory access. Runtime dispatch
+//! depends only on the CPU, not field operands, so their timing should not
+//! depend on operands unless the Rust toolchain or platform introduces an
+//! unexpected obstacle. A debug build also runs the assertions' checks,
 //! and debug mode carries no constant-time guarantee. The checks are written
 //! without data-dependent branches, and pass their words through
 //! `core::hint::black_box`, as `subtle` does. An inspection of the output of
@@ -150,6 +152,40 @@ if_asm_supported! {
         "x86-64"
     };
 
+    /// Whether field operations can use the compiled-in backend on this CPU.
+    #[inline(always)]
+    pub(crate) fn available() -> bool {
+        #[cfg(test)]
+        if tests::FORCE_PORTABLE.get() {
+            return false;
+        }
+        #[cfg(all(
+            target_arch = "x86_64",
+            not(target_env = "sgx"),
+            not(all(target_feature = "bmi2", target_feature = "adx"))
+        ))]
+        { dispatch::available() }
+        #[cfg(any(
+            target_arch = "aarch64",
+            target_arch = "arm",
+            all(target_feature = "bmi2", target_feature = "adx")
+        ))]
+        { true }
+        #[cfg(all(
+            target_arch = "x86_64",
+            target_env = "sgx",
+            not(all(target_feature = "bmi2", target_feature = "adx"))
+        ))]
+        { false }
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(target_env = "sgx"),
+        not(all(target_feature = "bmi2", target_feature = "adx"))
+    ))]
+    mod dispatch;
+
     #[cfg(any(target_arch = "aarch64", doc))]
     pub(crate) mod aarch64;
 
@@ -159,9 +195,8 @@ if_asm_supported! {
     #[cfg(any(target_arch = "arm", doc))]
     pub(crate) mod armv7em;
 
-    // The tests use std only to catch the debug assertions they check, so a release test
-    // build stays free of it.
-    #[cfg(all(test, debug_assertions))]
+    // Tests use std for thread-local dispatch overrides and to catch debug assertions.
+    #[cfg(test)]
     extern crate std;
 
     #[cfg(test)]
@@ -176,4 +211,16 @@ if_asm_unsupported! {
     /// where the crate has one, and `"portable"` where it does not. Intended for diagnostics only,
     /// such as logs and benchmark labels; it is not a stable interface.
     pub const BACKEND: &str = "portable";
+}
+
+/// Returns the arithmetic backend selected for field operations on this CPU.
+///
+/// The result is `"aarch64"`, `"armv7em"`, `"x86-64"`, or `"portable"`. Builds
+/// without assembly return `"portable"`. Selection uses cached CPU detection
+/// on x86-64, except when BMI2 and ADX are enabled at compile time. In SGX,
+/// assembly requires both target features. Intended for diagnostics only;
+/// not a stable interface.
+pub fn selected_backend() -> &'static str {
+    if_asm_supported! {{ if available() { BACKEND } else { "portable" } }}
+    if_asm_unsupported! {{ "portable" }}
 }

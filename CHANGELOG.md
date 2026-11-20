@@ -7,12 +7,19 @@ and this project adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `pasta_curves::selected_backend()` reports the runtime-selected arithmetic backend.
+
 ### Changed
 - Public point batch decoding uses four-lane AVX2 square-root arithmetic on
   x86-64 with `asm` and `sqrt-table` when runtime CPU and OS state checks permit
   it. Unsupported environments retain the scalar backend.
 - With `multicore`, large GLV MSMs prepare scalar halves and bases together on
   the worker pool before evaluating their windows.
+- The `asm` feature detects BMI2 and ADX at run time on x86-64 and falls back to portable
+  field arithmetic when either is missing, including in `no_std` builds. Enabling both
+  target features at compile time removes the check; SGX requires them to select assembly
+  without CPUID. AArch64 assembly remains unconditional.
 
 ## [0.6.4] - 2026-11-25
 ### Added
