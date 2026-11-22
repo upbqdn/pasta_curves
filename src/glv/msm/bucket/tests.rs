@@ -92,6 +92,24 @@ fn all_window_widths() {
     }
 }
 
+#[test]
+fn public_bucket_additions_match_group_addition() {
+    fn check<C: GlvParams>() {
+        let generator = C::generator();
+        let points = [C::identity(), generator, -generator, generator.double()];
+        for left in &points {
+            for right in &points {
+                let expected = *left + *right;
+                assert_eq!(left.add_bucket_projective(right), expected);
+                assert_eq!(left.add_bucket_affine(&right.to_affine_vartime()), expected);
+            }
+        }
+    }
+
+    check::<pallas::Point>();
+    check::<vesta::Point>();
+}
+
 /// Reducing a window in blocks, with each block's buckets carried into the
 /// next, gives the same buckets as one block. Equal and opposite bases make
 /// carried points double and cancel.

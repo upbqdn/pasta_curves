@@ -101,6 +101,126 @@ macro_rules! new_curve_impl {
             }
         }
 
+        impl $name {
+            // MSM bucket points and digits are public. Keep the public group additions on
+            // their existing path; only the GLV bucket running sum uses limb comparisons.
+            #[cfg(feature = "glv")]
+            pub(crate) fn add_bucket_projective(&self, rhs: &Self) -> Self {
+                self.add_projective::<true>(rhs)
+            }
+
+            #[cfg(feature = "glv")]
+            pub(crate) fn add_bucket_affine(&self, rhs: &$name_affine) -> Self {
+                self.add_affine::<true>(rhs)
+            }
+
+            fn add_projective<const PUBLIC: bool>(&self, rhs: &Self) -> Self {
+                let self_identity = if PUBLIC {
+                    self.z.0 == [0; 4]
+                } else {
+                    bool::from(self.is_identity())
+                };
+                let rhs_identity = if PUBLIC {
+                    rhs.z.0 == [0; 4]
+                } else {
+                    bool::from(rhs.is_identity())
+                };
+                if self_identity {
+                    *rhs
+                } else if rhs_identity {
+                    *self
+                } else {
+                    let z1z1 = Field::square(&self.z);
+                    let z2z2 = Field::square(&rhs.z);
+                    let u1 = self.x * z2z2;
+                    let u2 = rhs.x * z1z1;
+                    let s1 = self.y * z2z2 * rhs.z;
+                    let s2 = rhs.y * z1z1 * self.z;
+
+                    let x_equal = if PUBLIC { u1.0 == u2.0 } else { u1 == u2 };
+                    if x_equal {
+                        let y_equal = if PUBLIC { s1.0 == s2.0 } else { s1 == s2 };
+                        if y_equal {
+                            self.double()
+                        } else {
+                            Self::identity()
+                        }
+                    } else {
+                        let h = u2 - u1;
+                        let i = Field::square(&(h + h));
+                        let j = h * i;
+                        let r = s2 - s1;
+                        let r = r + r;
+                        let v = u1 * i;
+                        let x3 = Field::square(&r) - j - v - v;
+                        let s1 = s1 * j;
+                        let s1 = s1 + s1;
+                        let y3 = r * (v - x3) - s1;
+                        let z3 = Field::square(&(self.z + rhs.z)) - z1z1 - z2z2;
+                        let z3 = z3 * h;
+
+                        Self { x: x3, y: y3, z: z3 }
+                    }
+                }
+            }
+
+            fn add_affine<const PUBLIC: bool>(&self, rhs: &$name_affine) -> Self {
+                let self_identity = if PUBLIC {
+                    self.z.0 == [0; 4]
+                } else {
+                    bool::from(self.is_identity())
+                };
+                let rhs_identity = if PUBLIC {
+                    rhs.x.0 == [0; 4] && rhs.y.0 == [0; 4]
+                } else {
+                    bool::from(rhs.is_identity())
+                };
+                if self_identity {
+                    rhs.to_curve()
+                } else if rhs_identity {
+                    *self
+                } else {
+                    let z1z1 = Field::square(&self.z);
+                    let u2 = rhs.x * z1z1;
+                    let s2 = rhs.y * z1z1 * self.z;
+
+                    let x_equal = if PUBLIC {
+                        self.x.0 == u2.0
+                    } else {
+                        self.x == u2
+                    };
+                    if x_equal {
+                        let y_equal = if PUBLIC {
+                            self.y.0 == s2.0
+                        } else {
+                            self.y == s2
+                        };
+                        if y_equal {
+                            self.double()
+                        } else {
+                            Self::identity()
+                        }
+                    } else {
+                        let h = u2 - self.x;
+                        let hh = Field::square(&h);
+                        let i = hh + hh;
+                        let i = i + i;
+                        let j = h * i;
+                        let r = s2 - self.y;
+                        let r = r + r;
+                        let v = self.x * i;
+                        let x3 = Field::square(&r) - j - v - v;
+                        let j = self.y * j;
+                        let j = j + j;
+                        let y3 = r * (v - x3) - j;
+                        let z3 = Field::square(&(self.z + h)) - z1z1 - hh;
+
+                        Self { x: x3, y: y3, z: z3 }
+                    }
+                }
+            }
+        }
+
         /// Represents a point in the affine coordinate space (or the point at
         /// infinity).
         #[derive(Copy, Clone)]
@@ -640,43 +760,7 @@ macro_rules! new_curve_impl {
             type Output = $name;
 
             fn add(self, rhs: &'a $name) -> $name {
-                if bool::from(self.is_identity()) {
-                    *rhs
-                } else if bool::from(rhs.is_identity()) {
-                    *self
-                } else {
-                    let z1z1 = Field::square(&self.z);
-                    let z2z2 = Field::square(&rhs.z);
-                    let u1 = self.x * z2z2;
-                    let u2 = rhs.x * z1z1;
-                    let s1 = self.y * z2z2 * rhs.z;
-                    let s2 = rhs.y * z1z1 * self.z;
-
-                    if u1 == u2 {
-                        if s1 == s2 {
-                            self.double()
-                        } else {
-                            $name::identity()
-                        }
-                    } else {
-                        let h = u2 - u1;
-                        let i = Field::square(&(h + h));
-                        let j = h * i;
-                        let r = s2 - s1;
-                        let r = r + r;
-                        let v = u1 * i;
-                        let x3 = Field::square(&r) - j - v - v;
-                        let s1 = s1 * j;
-                        let s1 = s1 + s1;
-                        let y3 = r * (v - x3) - s1;
-                        let z3 = Field::square(&(self.z + rhs.z)) - z1z1 - z2z2;
-                        let z3 = z3 * h;
-
-                        $name {
-                            x: x3, y: y3, z: z3
-                        }
-                    }
-                }
+                self.add_projective::<false>(rhs)
             }
         }
 
@@ -684,41 +768,7 @@ macro_rules! new_curve_impl {
             type Output = $name;
 
             fn add(self, rhs: &'a $name_affine) -> $name {
-                if bool::from(self.is_identity()) {
-                    rhs.to_curve()
-                } else if bool::from(rhs.is_identity()) {
-                    *self
-                } else {
-                    let z1z1 = Field::square(&self.z);
-                    let u2 = rhs.x * z1z1;
-                    let s2 = rhs.y * z1z1 * self.z;
-
-                    if self.x == u2 {
-                        if self.y == s2 {
-                            self.double()
-                        } else {
-                            $name::identity()
-                        }
-                    } else {
-                        let h = u2 - self.x;
-                        let hh = Field::square(&h);
-                        let i = hh + hh;
-                        let i = i + i;
-                        let j = h * i;
-                        let r = s2 - self.y;
-                        let r = r + r;
-                        let v = self.x * i;
-                        let x3 = Field::square(&r) - j - v - v;
-                        let j = self.y * j;
-                        let j = j + j;
-                        let y3 = r * (v - x3) - j;
-                        let z3 = Field::square(&(self.z + h)) - z1z1 - hh;
-
-                        $name {
-                            x: x3, y: y3, z: z3
-                        }
-                    }
-                }
+                self.add_affine::<false>(rhs)
             }
         }
 

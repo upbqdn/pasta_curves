@@ -63,7 +63,7 @@ use super::calibration::CALIBRATION;
 use crate::arithmetic::VartimeField;
 use crate::glv::booth::{SignedMagnitude, booth_digit, window_count};
 use crate::glv::{
-    GlvParams, HALVES, affine_from_xy_unchecked, affine_xy, phi_x, private::AffineBase,
+    GlvParams, HALVES, affine_from_xy_unchecked, affine_xy, phi_x, private::{AffineBase, Sealed},
 };
 pub(in crate::glv) use affine::{AffinePoint, reduce_affine_buckets};
 use affine::{ReduceScratch, reduce_affine_buckets_reusing};
@@ -163,9 +163,12 @@ where
     let mut sum = C::identity();
     for bucket in buckets.iter().rev() {
         if let Some(point) = bucket {
-            running += affine_from_xy_unchecked::<C>(point.x, point.y);
+            // The MSM's scalars and bases are public; keep constant-time group additions
+            // untouched for callers outside this already variable-time bucket path.
+            let affine = affine_from_xy_unchecked::<C>(point.x, point.y);
+            running = running.add_bucket_affine(&affine);
         }
-        sum += running;
+        sum = sum.add_bucket_projective(&running);
     }
     sum
 }

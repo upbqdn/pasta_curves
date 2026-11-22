@@ -125,6 +125,13 @@ mod private {
         /// as $(0, 0)$; `CurveAffine::coordinates` would return the same pair
         /// after a constant-time identity check.
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>);
+
+        /// Adds public MSM bucket points using variable-time limb comparisons.
+        /// This path must not be used for secret scalars or points.
+        fn add_bucket_projective(&self, rhs: &Self) -> Self;
+
+        /// Adds a public affine bucket point, including the identity.
+        fn add_bucket_affine(&self, rhs: &Self::AffineExt) -> Self;
     }
 
     impl Sealed for crate::pallas::Point {
@@ -135,6 +142,14 @@ mod private {
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
             point.raw_xy()
         }
+
+        fn add_bucket_projective(&self, rhs: &Self) -> Self {
+            crate::pallas::Point::add_bucket_projective(self, rhs)
+        }
+
+        fn add_bucket_affine(&self, rhs: &Self::AffineExt) -> Self {
+            crate::pallas::Point::add_bucket_affine(self, rhs)
+        }
     }
 
     impl Sealed for crate::vesta::Point {
@@ -144,6 +159,14 @@ mod private {
 
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
             point.raw_xy()
+        }
+
+        fn add_bucket_projective(&self, rhs: &Self) -> Self {
+            crate::vesta::Point::add_bucket_projective(self, rhs)
+        }
+
+        fn add_bucket_affine(&self, rhs: &Self::AffineExt) -> Self {
+            crate::vesta::Point::add_bucket_affine(self, rhs)
         }
     }
 }
