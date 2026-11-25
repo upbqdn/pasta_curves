@@ -267,30 +267,46 @@ where
             return None;
         }
 
-        // Pending outputs identify surviving pairs; cancelled pairs have no
-        // record. A carried odd point survives unchanged. The write index is
-        // never ahead of the read index, so compaction cannot clobber a result.
+        // Incomplete levels keep every pair. Only the complete fallback can
+        // cancel a pair, so avoid searching pending additions on the hot path.
         next_offsets.clear();
         next_offsets.push(0);
-        let mut additions = pending.iter().peekable();
         let mut output = 0;
-        for range in offsets.windows(2) {
-            let end_pairs = range[1] - (range[1] - range[0]) % 2;
-            for input in (range[0]..end_pairs).step_by(2) {
-                if additions
-                    .peek()
-                    .is_some_and(|addition| addition.output == input)
-                {
+        if !COMPLETE {
+            for range in offsets.windows(2) {
+                let end_pairs = range[1] - (range[1] - range[0]) % 2;
+                for input in (range[0]..end_pairs).step_by(2) {
                     points[output] = points[input];
                     output += 1;
-                    additions.next();
                 }
+                if end_pairs != range[1] {
+                    points[output] = points[end_pairs];
+                    output += 1;
+                }
+                next_offsets.push(output);
             }
-            if end_pairs != range[1] {
-                points[output] = points[end_pairs];
-                output += 1;
+        } else {
+            // Pending outputs identify surviving pairs. The write index is
+            // never ahead of the read index, including after cancellation.
+            let mut additions = pending.iter().peekable();
+            for range in offsets.windows(2) {
+                let end_pairs = range[1] - (range[1] - range[0]) % 2;
+                for input in (range[0]..end_pairs).step_by(2) {
+                    if additions
+                        .peek()
+                        .is_some_and(|addition| addition.output == input)
+                    {
+                        points[output] = points[input];
+                        output += 1;
+                        additions.next();
+                    }
+                }
+                if end_pairs != range[1] {
+                    points[output] = points[end_pairs];
+                    output += 1;
+                }
+                next_offsets.push(output);
             }
-            next_offsets.push(output);
         }
         points.truncate(output);
         core::mem::swap(offsets, next_offsets);

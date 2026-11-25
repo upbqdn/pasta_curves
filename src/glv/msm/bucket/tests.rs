@@ -1,4 +1,6 @@
 use ff::Field;
+use rand::SeedableRng;
+use rand_xorshift::XorShiftRng;
 
 use super::*;
 use crate::glv::booth::checked_signed_magnitudes;
@@ -90,6 +92,65 @@ fn all_window_widths() {
         forced_window::<pallas::Point>(64, width);
         forced_window::<vesta::Point>(64, width);
     }
+}
+
+/// Large clean levels take the direct compaction path; repeated/opposite bases
+/// force the complete-formula fallback at different levels.
+fn randomized_bucket_msm_matches_naive<C>()
+where
+    C: GlvParams,
+    AffineBase<C>: CachedField,
+{
+    let mut rng = XorShiftRng::seed_from_u64(0x6d736d);
+    for (terms, width) in [
+        (0, 3),
+        (1, 3),
+        (31, 6),
+        (32, 6),
+        (33, 6),
+        (96, 3),
+        (96, 7),
+        (320, 9),
+    ] {
+        let mut scalars = Vec::with_capacity(terms);
+        let mut bases = Vec::with_capacity(terms);
+        for i in 0..terms {
+            scalars.push(match i % 11 {
+                0 => C::ScalarExt::ZERO,
+                1..=3 => C::ScalarExt::ONE,
+                _ => C::ScalarExt::random(&mut rng),
+            });
+            let base = match i % 11 {
+                0 => C::identity(),
+                1 | 2 => C::generator(),
+                3 => -C::generator(),
+                _ => C::random(&mut rng),
+            };
+            bases.push(base.to_affine_vartime());
+        }
+        let expected = scalars
+            .iter()
+            .zip(&bases)
+            .fold(C::identity(), |sum, (scalar, base)| sum + *base * scalar);
+        let components = scalars
+            .iter()
+            .map(decompose::<C>)
+            .map(checked_signed_magnitudes)
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
+        let prepared = multiexp_bases::<C>(&bases);
+        assert_eq!(
+            multiexp_serial::<C>(&components, &prepared, width),
+            Some(expected),
+            "{terms} terms at width {width}"
+        );
+    }
+}
+
+#[test]
+fn randomized_bucket_msm_matches_naive_on_both_curves() {
+    randomized_bucket_msm_matches_naive::<pallas::Point>();
+    randomized_bucket_msm_matches_naive::<vesta::Point>();
 }
 
 #[cfg(feature = "multicore")]
