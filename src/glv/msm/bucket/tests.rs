@@ -249,6 +249,37 @@ fn window_blocks() {
 }
 
 #[test]
+fn whole_window_above_previous_block_limit_matches_blocks() {
+    let (scalars, bases) = exceptional_inputs::<vesta::Point>((1 << 14) + 1);
+    let components = scalars
+        .iter()
+        .map(decompose::<vesta::Point>)
+        .map(checked_signed_magnitudes)
+        .collect::<Option<Vec<_>>>()
+        .unwrap();
+    let bases = multiexp_bases::<vesta::Point>(&bases);
+    let as_points = |buckets: &[Option<AffinePoint<crate::Fq>>]| {
+        buckets
+            .iter()
+            .copied()
+            .map(bucket_point::<vesta::Point>)
+            .collect::<Vec<_>>()
+    };
+    let width = 9;
+    let whole = as_points(
+        WindowReducer::default()
+            .fill_window(&components, &bases, width, 0)
+            .unwrap(),
+    );
+    let blocked = as_points(
+        WindowReducer::default()
+            .fill_window_in_blocks(&components, &bases, width, 0, 1 << 14)
+            .unwrap(),
+    );
+    assert_eq!(whole, blocked);
+}
+
+#[test]
 fn cached_scratch_alternating_curves_sizes_and_widths() {
     for (terms, width) in [
         (300, 7),

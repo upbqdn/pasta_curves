@@ -33,9 +33,9 @@
 //!
 //! # Memory
 //!
-//! A window is filled and reduced in blocks of at most
-//! `max(2^14, 8 * buckets)` components; each block's bucket sums enter the
-//! next block as the first point of the same buckets. The buffers live in a
+//! A window is filled and reduced in one pass when it has at most
+//! [`MAX_WHOLE_WINDOW_TERMS`] terms. Larger windows use capped blocks, carrying
+//! bucket sums from one block into the next. The buffers live in a
 //! [`WindowReducer`] that is reused across windows, and with `multicore`
 //! across calls on the same thread ([`cache`]).
 //!
@@ -44,12 +44,10 @@
 //! [`multiexp`] is the entry point, with bases prepared by [`multiexp_bases`].
 //! It runs the windows with [`multiexp_serial`] or, with `multicore`,
 //! `multiexp_parallel`, and combines them with [`horner`]. A [`WindowReducer`]
-//! computes each window: [`WindowReducer::fill_window`] splits it into blocks
-//! (the calibration's `min_window_block_terms` and
-//! `window_block_terms_per_bucket`),
-//! [`WindowReducer::fill_block`] assigns the digits to buckets
-//! ([`window_assignments`]) and reduces them ([`affine`]), and [`sum_buckets`]
-//! turns the buckets into the window sum. Reducers come from [`cache`].
+//! computes each window: [`WindowReducer::fill_window`] uses whole windows
+//! or calibrated blocks, and [`WindowReducer::fill_block`] assigns the digits
+//! to buckets ([`window_assignments`]) and reduces them ([`affine`]).
+//! [`sum_buckets`] turns the buckets into the window sum. Reducers come from [`cache`].
 
 mod affine;
 mod cache;
@@ -72,6 +70,10 @@ use cache::Checkout;
 
 #[cfg(test)]
 mod tests;
+
+/// Maximum terms staged in one window. At most two nonzero GLV components
+/// per term are assigned; larger MSMs retain the bounded block reducer.
+const MAX_WHOLE_WINDOW_TERMS: usize = 1 << 18;
 
 /// One nonzero digit of a window: component `component`, that is half
 /// `component % HALVES` of base `component / HALVES`, goes into bucket
@@ -259,9 +261,9 @@ where
     /// [`affine::reduce_affine_buckets_reusing`]); it does not happen for valid
     /// inputs.
     ///
-    /// Scratch is bounded by `max(2^14, 8 * buckets)` terms for each window, rather
-    /// than by the whole input. Wider windows increase the bucket count and thus
-    /// the block bound; parallel windows multiply this bound by the jobs in flight.
+    /// A window of at most [`MAX_WHOLE_WINDOW_TERMS`] terms is reduced in one
+    /// pass. Larger windows use blocks capped at that size. At most two
+    /// components per term are staged, multiplied by the windows in flight.
     fn fill_window(
         &mut self,
         components: &[(SignedMagnitude, SignedMagnitude)],
@@ -269,10 +271,18 @@ where
         window_bits: usize,
         window: usize,
     ) -> Option<&[Option<AffinePoint<F>>]> {
-        let bucket_count = bucket_count(window_bits);
-        let block_terms = CALIBRATION
-            .min_window_block_terms
-            .max(bucket_count.saturating_mul(CALIBRATION.window_block_terms_per_bucket));
+        let buckets = bucket_count(window_bits);
+        if buckets > MAX_WHOLE_WINDOW_TERMS {
+            return None;
+        }
+        let block_terms = if components.len() <= MAX_WHOLE_WINDOW_TERMS {
+            components.len().max(1)
+        } else {
+            CALIBRATION
+                .min_window_block_terms
+                .max(buckets.saturating_mul(CALIBRATION.window_block_terms_per_bucket))
+                .min(MAX_WHOLE_WINDOW_TERMS)
+        };
         self.fill_window_in_blocks(components, bases, window_bits, window, block_terms)
     }
 
