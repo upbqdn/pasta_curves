@@ -72,7 +72,7 @@ use alloc::vec::Vec;
 use super::booth::{self, SignedMagnitude};
 #[cfg(feature = "multicore")]
 use bucket::multiexp_base;
-use bucket::{CachedField, MultiexpBase, multiexp, multiexp_bases};
+use bucket::{block_terms, CachedField, MultiexpBase, multiexp, multiexp_bases};
 use plan::{Plan, current_num_threads};
 use straus::straus_multiexp;
 #[cfg(feature = "multicore")]
@@ -83,6 +83,30 @@ pub(super) use bucket::{AffinePoint, reduce_affine_buckets};
 use super::{GlvParams, decompose, private::AffineBase};
 #[cfg(feature = "multicore")]
 use maybe_rayon::prelude::*;
+
+/// Describe the exact planner decision without running the MSM.
+pub(super) fn debug_plan<C: GlvParams>(terms: usize) -> super::DebugMsmPlan {
+    let threads = current_num_threads();
+    let (backend, window_bits, block_terms, jobs) = match plan::plan::<C>(terms, threads) {
+        Plan::Straus => ("straus", None, None, 1),
+        #[cfg(feature = "multicore")]
+        Plan::StrausLeaves { jobs } => ("straus-leaves", None, None, jobs),
+        Plan::Buckets { window_bits } => (
+            "buckets",
+            Some(window_bits),
+            Some(block_terms(window_bits)),
+            threads.min(booth::window_count(window_bits)),
+        ),
+        Plan::Decline => ("generic", None, None, 1),
+    };
+    super::DebugMsmPlan {
+        backend,
+        window_bits,
+        block_terms,
+        jobs,
+        threads,
+    }
+}
 
 /// Prepare decomposed scalars and bases together on the pool before any window starts.
 #[allow(clippy::type_complexity)]

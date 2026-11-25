@@ -107,6 +107,28 @@ pub(crate) mod fixed_base;
 #[cfg(feature = "glv")]
 pub(crate) mod msm;
 
+/// The GLV planner's choice for a public MSM on the current Rayon pool.
+#[cfg(feature = "glv")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DebugMsmPlan {
+    /// Which backend the GLV hook selects, or `"generic"` if it declines.
+    pub backend: &'static str,
+    /// Signed-Booth window width when using the GLV bucket backend.
+    pub window_bits: Option<usize>,
+    /// Maximum components per reduction block, for the bucket backend.
+    pub block_terms: Option<usize>,
+    /// Number of parallel GLV jobs, or one for serial paths.
+    pub jobs: usize,
+    /// Number of Rayon workers considered by the planner.
+    pub threads: usize,
+}
+
+/// Report the same plan used by `CurveExt::try_multiexp_vartime`.
+#[cfg(feature = "glv")]
+pub fn debug_msm_plan<C: GlvParams>(terms: usize) -> DebugMsmPlan {
+    msm::debug_plan::<C>(terms)
+}
+
 mod private {
     #[cfg(feature = "glv")]
     use crate::arithmetic::{CurveAffine, CurveExt};

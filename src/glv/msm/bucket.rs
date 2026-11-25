@@ -109,6 +109,13 @@ fn bucket_count(window_bits: usize) -> usize {
     1 << (window_bits - 1)
 }
 
+/// Maximum components reduced together within each signed-Booth window.
+pub(super) fn block_terms(window_bits: usize) -> usize {
+    CALIBRATION
+        .min_window_block_terms
+        .max(bucket_count(window_bits).saturating_mul(CALIBRATION.window_block_terms_per_bucket))
+}
+
 /// Collects the nonzero signed points assigned to one Booth window.
 ///
 /// Fills `assignments` with one entry per nonzero digit of window `window`,
@@ -269,10 +276,7 @@ where
         window_bits: usize,
         window: usize,
     ) -> Option<&[Option<AffinePoint<F>>]> {
-        let bucket_count = bucket_count(window_bits);
-        let block_terms = CALIBRATION
-            .min_window_block_terms
-            .max(bucket_count.saturating_mul(CALIBRATION.window_block_terms_per_bucket));
+        let block_terms = block_terms(window_bits);
         self.fill_window_in_blocks(components, bases, window_bits, window, block_terms)
     }
 
