@@ -427,9 +427,10 @@ pub(super) fn mul(lhs: &Limbs, rhs: &Limbs, modulus: &Limbs, inv: u64) -> Limbs 
 /// Phase one of squaring: the 512-bit product as cross products, one
 /// doubling pass, and the diagonals (ten MULX against the multiplication's
 /// sixteen). Always inlined so that the repeated-squaring loop of
-/// `sqr_n_mul` in `entry.rs` can pass the accumulator in registers. The
-/// block occupies fifteen simultaneous registers, which is the most the
-/// compiler will allocate to one block in both the release and dev profiles.
+/// `sqr_n_mul` in `entry.rs` can pass the accumulator in registers.
+/// The unused output limb z0 stages cross products; after each diagonal
+/// load, its spent input register stages the high and low product halves.
+/// This keeps the block at thirteen registers, including MULX's RDX.
 ///
 /// # Safety
 ///
@@ -446,30 +447,31 @@ fn square_lo(value: Limbs) -> [u64; 8] {
         asm!(
             // Phase 1: the 512-bit square in z0..z7.
             // Cross products a[i]*a[j] (i < j), accumulated as they stream.
+            // z0 is unused until the diagonals; z7 is unused until the last cross product.
             "xor {z5:e}, {z5:e}",
             "xor {z6:e}, {z6:e}",
-            "xor {z7:e}, {z7:e}",
             "mov rdx, {a0}",
-            "mulx {t1}, {z1}, {a1}",              // a0*a1.
-            "mulx {t2}, {z2}, {a2}",              // a0*a2.
+            "mulx {z0}, {z1}, {a1}",              // a0*a1.
+            "mulx {z7}, {z2}, {a2}",              // a0*a2.
             "mulx {z4}, {z3}, {a3}",              // a0*a3.
-            "add {z2}, {t1}",                        // Fold high(a0*a1).
+            "add {z2}, {z0}",                        // Fold high(a0*a1).
             // Fold high(a0*a2) and carry.
-            "adc {z3}, {t2}",
+            "adc {z3}, {z7}",
             "adc {z4}, 0",
             "mov rdx, {a1}",
-            "mulx {t2}, {t1}, {a2}",              // a1*a2.
-            "add {z3}, {t1}",
-            "adc {z4}, {t2}",
+            "mulx {z7}, {z0}, {a2}",              // a1*a2.
+            "add {z3}, {z0}",
+            "adc {z4}, {z7}",
             "adc {z5}, 0",
-            "mulx {t2}, {t1}, {a3}",              // a1*a3.
-            "add {z4}, {t1}",
-            "adc {z5}, {t2}",
+            "mulx {z7}, {z0}, {a3}",              // a1*a3.
+            "add {z4}, {z0}",
+            "adc {z5}, {z7}",
             "adc {z6}, 0",
             "mov rdx, {a2}",
-            "mulx {t2}, {t1}, {a3}",              // a2*a3.
-            "add {z5}, {t1}",
-            "adc {z6}, {t2}",
+            "mulx {z7}, {z0}, {a3}",              // a2*a3.
+            "add {z5}, {z0}",
+            "adc {z6}, {z7}",
+            "mov {z7}, 0",
             "adc {z7}, 0",
             // Double the cross products. The doubled sum is below 2^512, so
             // no carry leaves z7.
@@ -483,22 +485,22 @@ fn square_lo(value: Limbs) -> [u64; 8] {
             // Add the diagonal squares in one carry chain (MOV and MULX
             // preserve flags).
             "mov rdx, {a0}",
-            "mulx {t2}, {z0}, rdx",                  // z0 = low(a0^2).
-            "add {z1}, {t2}",                        // High(a0^2).
+            "mulx {a0}, {z0}, rdx",                  // z0 = low(a0^2).
+            "add {z1}, {a0}",                        // High(a0^2).
             "mov rdx, {a1}",
-            "mulx {t2}, {t1}, rdx",
-            "adc {z2}, {t1}",
-            "adc {z3}, {t2}",
+            "mulx {a0}, {a1}, rdx",
+            "adc {z2}, {a1}",
+            "adc {z3}, {a0}",
             "mov rdx, {a2}",
-            "mulx {t2}, {t1}, rdx",
-            "adc {z4}, {t1}",
-            "adc {z5}, {t2}",
+            "mulx {a0}, {a1}, rdx",
+            "adc {z4}, {a1}",
+            "adc {z5}, {a0}",
             "mov rdx, {a3}",
-            "mulx {t2}, {t1}, rdx",
-            "adc {z6}, {t1}",
-            "adc {z7}, {t2}",                        // a^2 < 2^510: no carry out.
-            a0 = in(reg) a0,
-            a1 = in(reg) a1,
+            "mulx {a0}, {a1}, rdx",
+            "adc {z6}, {a1}",
+            "adc {z7}, {a0}",                        // a^2 < 2^510: no carry out.
+            a0 = inout(reg) a0 => _,
+            a1 = inout(reg) a1 => _,
             a2 = in(reg) a2,
             a3 = in(reg) a3,
             z0 = out(reg) z0,
@@ -509,8 +511,6 @@ fn square_lo(value: Limbs) -> [u64; 8] {
             z5 = out(reg) z5,
             z6 = out(reg) z6,
             z7 = out(reg) z7,
-            t1 = out(reg) _,
-            t2 = out(reg) _,
             out("rdx") _,
             options(pure, nomem, nostack),
         );
@@ -523,6 +523,9 @@ fn square_lo(value: Limbs) -> [u64; 8] {
 /// in (the sum stays below `2p`, so no carry escapes; see `square` in
 /// [`Backend`]), and a CMOV conditional subtraction. Always inlined like
 /// [`square_lo`], for the same loop-accumulator reason.
+/// The cancellations and final fold are separate blocks, so the high
+/// product limbs are not operands of the cancellations. Each block needs
+/// at most thirteen registers, including MULX's RDX.
 ///
 /// # Safety
 ///
@@ -531,6 +534,7 @@ fn square_lo(value: Limbs) -> [u64; 8] {
 #[inline(always)]
 fn square_hi(product: [u64; 8], modulus: &Limbs, inv: u64) -> Limbs {
     let (o0, o1, o2, o3): (u64, u64, u64, u64);
+    let (mut a, mut z0, mut z1, mut z2): (u64, u64, u64, u64);
     // SAFETY: straight-line arithmetic reading only the four modulus words
     // behind the passed reference (`readonly`), with `inv` arriving in a
     // register of its own. No stack use, and outputs depend only on the
@@ -618,6 +622,19 @@ fn square_hi(product: [u64; 8], modulus: &Limbs, inv: u64) -> Limbs {
             "adc {z0}, {t2}",
             "adc {z1}, 0",
             "adc {z2}, {z3}",
+            a = out(reg) a,
+            p = in(reg) modulus.as_ptr(),
+            inv = in(reg) inv,
+            z0 = inout(reg) product[0] => z0,
+            z1 = inout(reg) product[1] => z1,
+            z2 = inout(reg) product[2] => z2,
+            z3 = inout(reg) product[3] => _,
+            t1 = out(reg) _,
+            t2 = out(reg) _,
+            out("rdx") _,
+            options(pure, readonly, nostack),
+        );
+        asm!(
 
             // Fold in the high product half; the sum stays below 2p, so no
             // carry escapes and a four-limb conditional subtraction suffices.
@@ -638,16 +655,15 @@ fn square_hi(product: [u64; 8], modulus: &Limbs, inv: u64) -> Limbs {
             "cmovnc {z0}, {t2}",
             "cmovnc {z1}, {z3}",
             "cmovnc {z2}, {z4}",
-            // Window limbs: each z register is both an input (a product limb)
-            // and a rewritten accumulator position; z3 and z4 end as scratch.
-            a = out(reg) o0,
+            // The high product limbs are spent by the fold; z3 and z4
+            // stage the tentative difference for conditional subtraction.
+            a = inout(reg) a => o0,
             p = in(reg) modulus.as_ptr(),
-            inv = in(reg) inv,
             p3 = const PASTA_HIGH_LIMB,
-            z0 = inout(reg) product[0] => o1,
-            z1 = inout(reg) product[1] => o2,
-            z2 = inout(reg) product[2] => o3,
-            z3 = inout(reg) product[3] => _,
+            z0 = inout(reg) z0 => o1,
+            z1 = inout(reg) z1 => o2,
+            z2 = inout(reg) z2 => o3,
+            z3 = out(reg) _,
             z4 = inout(reg) product[4] => _,
             z5 = in(reg) product[5],
             z6 = in(reg) product[6],

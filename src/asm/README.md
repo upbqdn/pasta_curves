@@ -48,10 +48,11 @@ With the `asm` feature enabled, backend availability and restrictions are:
 - **AArch64:** selected on `target_arch = "aarch64"`.
 - **x86-64:** selected on non-Apple `target_arch = "x86_64"` with 64-bit pointers. `mul`,
   `square`, and the routines built on them read limbs through pointers, which rules out the x32
-  ABI. Apple targets reserve `rbp`, leaving too few registers for the squaring blocks. Outside
-  SGX, field operations check for BMI2 and ADX at run time and use portable Rust when either is
-  missing. Detection is cached without `std` or allocation. Enabling both target features at
-  compile time removes detection; SGX requires them because CPUID is unavailable there.
+  ABI. Apple targets remain excluded by the backend gate. The asm blocks fit builds with
+  `-C force-frame-pointers=yes`, even when LLVM also reserves `rbx`. Outside SGX, field
+  operations check for BMI2 and ADX at run time and use portable Rust when either is missing.
+  Detection is cached without `std` or allocation. Enabling both target features at compile
+  time removes detection; SGX requires them because CPUID is unavailable there.
 - **ARMv7E-M:** selected on 32-bit little-endian `target_arch = "arm"` with
   `target_os = "none"` and `target_abi = "eabihf"`. It is intended for
   `thumbv7em-none-eabihf` (Cortex-M4/M7) and requires Thumb state, Thumb-2, and UMAAL (DSP).
