@@ -640,9 +640,9 @@ macro_rules! new_curve_impl {
             type Output = $name;
 
             fn add(self, rhs: &'a $name) -> $name {
-                if bool::from(self.is_identity()) {
+                if self.z.is_zero_vartime() {
                     *rhs
-                } else if bool::from(rhs.is_identity()) {
+                } else if rhs.z.is_zero_vartime() {
                     *self
                 } else {
                     let z1z1 = Field::square(&self.z);
@@ -684,9 +684,9 @@ macro_rules! new_curve_impl {
             type Output = $name;
 
             fn add(self, rhs: &'a $name_affine) -> $name {
-                if bool::from(self.is_identity()) {
-                    rhs.to_curve()
-                } else if bool::from(rhs.is_identity()) {
+                if self.z.is_zero_vartime() {
+                    rhs.to_curve_vartime()
+                } else if rhs.x.is_zero_vartime() && rhs.y.is_zero_vartime() {
                     *self
                 } else {
                     let z1z1 = Field::square(&self.z);
@@ -803,14 +803,14 @@ macro_rules! new_curve_impl {
             type Output = $name;
 
             fn add(self, rhs: &'a $name_affine) -> $name {
-                if bool::from(self.is_identity()) {
-                    rhs.to_curve()
-                } else if bool::from(rhs.is_identity()) {
-                    self.to_curve()
+                if self.x.is_zero_vartime() && self.y.is_zero_vartime() {
+                    rhs.to_curve_vartime()
+                } else if rhs.x.is_zero_vartime() && rhs.y.is_zero_vartime() {
+                    self.to_curve_vartime()
                 } else {
                     if self.x == rhs.x {
                         if self.y == rhs.y {
-                            self.to_curve().double()
+                            self.to_curve_vartime().double()
                         } else {
                             $name::identity()
                         }
@@ -909,6 +909,21 @@ macro_rules! new_curve_impl {
                     x: self.x,
                     y: self.y,
                     z: $base::conditional_select(&$base::one(), &$base::zero(), self.is_identity()),
+                }
+            }
+        }
+
+        impl $name_affine {
+            // Only callers that already branch on point identity use this conversion.
+            fn to_curve_vartime(&self) -> $name {
+                $name {
+                    x: self.x,
+                    y: self.y,
+                    z: if self.x.is_zero_vartime() && self.y.is_zero_vartime() {
+                        $base::zero()
+                    } else {
+                        $base::one()
+                    },
                 }
             }
         }
@@ -1171,6 +1186,9 @@ macro_rules! impl_projective_curve_specific {
             //
             // There are no points of order 2.
 
+            if self.z.is_zero_vartime() {
+                return $name::identity();
+            }
             let a = Field::square(&self.x);
             let b = Field::square(&self.y);
             let c = Field::square(&b);
@@ -1188,13 +1206,11 @@ macro_rules! impl_projective_curve_specific {
             let c = c + c;
             let y3 = e * (d - x3) - c;
 
-            let tmp = $name {
+            $name {
                 x: x3,
                 y: y3,
                 z: z3,
-            };
-
-            $name::conditional_select(&tmp, &$name::identity(), self.is_identity())
+            }
         }
     };
     ($name:ident, $base:ident, general) => {
@@ -1208,6 +1224,9 @@ macro_rules! impl_projective_curve_specific {
             //
             // There are no points of order 2.
 
+            if self.z.is_zero_vartime() {
+                return $name::identity();
+            }
             let xx = Field::square(&self.x);
             let yy = Field::square(&self.y);
             let a = Field::square(&yy);
@@ -1221,13 +1240,11 @@ macro_rules! impl_projective_curve_specific {
             let y3 = m * (s - x3) - a;
             let z3 = Field::square(&(self.y + self.z)) - yy - zz;
 
-            let tmp = $name {
+            $name {
                 x: x3,
                 y: y3,
                 z: z3,
-            };
-
-            $name::conditional_select(&tmp, &$name::identity(), self.is_identity())
+            }
         }
     };
 }
@@ -1646,6 +1663,7 @@ mod tests {
     use rand_xorshift::XorShiftRng;
     use std::vec::Vec;
 
+    mod arithmetic;
     mod normalization;
 
     // Built in a `const` context, so that `from_xy_unchecked` staying `const` is
