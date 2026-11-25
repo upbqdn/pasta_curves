@@ -92,6 +92,49 @@ fn all_window_widths() {
     }
 }
 
+#[cfg(feature = "multicore")]
+#[test]
+fn window_jobs_match_serial_exact_coordinates() {
+    fn check<C>()
+    where
+        C: GlvParams,
+        AffineBase<C>: CachedField,
+    {
+        let pools = [1, 2, 4, 32].map(|workers| {
+            maybe_rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .expect("a custom worker pool is available in the test environment")
+        });
+        for terms in [0, 1, 17, 65, 257] {
+            let (scalars, bases) = exceptional_inputs::<C>(terms);
+            let components = scalars
+                .iter()
+                .map(decompose::<C>)
+                .map(checked_signed_magnitudes)
+                .collect::<Option<Vec<_>>>()
+                .unwrap();
+            let bases = multiexp_bases::<C>(&bases);
+            for width in [1, 3, 6, 9, 10] {
+                let serial = multiexp_serial::<C>(&components, &bases, width)
+                    .map(|sum| sum.jacobian_coordinates());
+                for (workers, pool) in [1, 2, 4, 32].into_iter().zip(&pools) {
+                    let parallel = pool.install(|| {
+                        multiexp_parallel::<C>(&components, &bases, width)
+                            .map(|sum| sum.jacobian_coordinates())
+                    });
+                    assert_eq!(
+                        parallel, serial,
+                        "{terms} terms, width {width}, {workers} workers"
+                    );
+                }
+            }
+        }
+    }
+    check::<pallas::Point>();
+    check::<vesta::Point>();
+}
+
 /// Reducing a window in blocks, with each block's buckets carried into the
 /// next, gives the same buckets as one block. Equal and opposite bases make
 /// carried points double and cancel.
