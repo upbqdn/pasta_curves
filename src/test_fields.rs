@@ -434,6 +434,28 @@ fn known_answers_match_the_portable_arithmetic() {
     check!(Fq, &FQ);
 }
 
+#[test]
+fn partial_eq_matches_constant_time_equality() {
+    use crate::fields::{Fp, Fq};
+    use subtle::ConstantTimeEq;
+
+    check_property(field_and_two_residues(), |(field, a, b)| {
+        match field {
+            0 => {
+                let (a, b) = (Fp(a), Fp(b));
+                prop_assert_eq!(a == b, bool::from(a.ct_eq(&b)));
+                prop_assert_eq!(a == a, bool::from(a.ct_eq(&a)));
+            }
+            _ => {
+                let (a, b) = (Fq(a), Fq(b));
+                prop_assert_eq!(a == b, bool::from(a.ct_eq(&b)));
+                prop_assert_eq!(a == a, bool::from(a.ct_eq(&a)));
+            }
+        }
+        Ok(())
+    });
+}
+
 /// A canonical residue of the field `FIELDS[i]`, weighted toward the edges of `[0, p)`, where
 /// uniform sampling almost never lands. It is drawn from one of five families:
 ///
