@@ -65,7 +65,12 @@ impl ConstantTimeEq for Fp {
 impl PartialEq for Fp {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1
+        // PartialEq returns a bool that callers can branch on; use ct_eq for constant time.
+        ((self.0[0] ^ other.0[0])
+            | (self.0[1] ^ other.0[1])
+            | (self.0[2] ^ other.0[2])
+            | (self.0[3] ^ other.0[3]))
+            == 0
     }
 }
 
