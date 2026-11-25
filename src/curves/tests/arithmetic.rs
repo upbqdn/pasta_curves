@@ -198,6 +198,14 @@ macro_rules! old_arithmetic {
                     // Unchecked affine points can be off-curve; retain their exact coordinates.
                     let unchecked = $affine::from_xy_unchecked($base::from(a), $base::from(b));
                     compare(p, q, unchecked, qa);
+                    // Half-zero points catch an identity test that checks only one coordinate.
+                    for half_zero in [
+                        $affine::from_xy_unchecked($base::ZERO, $base::from(b) + $base::ONE),
+                        $affine::from_xy_unchecked($base::from(a) + $base::ONE, $base::ZERO),
+                    ] {
+                        compare(p, q, half_zero, qa);
+                        compare(p, q, pa, half_zero);
+                    }
                     let unchecked_projective = $curve {
                         x: $base::from(a),
                         y: $base::from(b),
