@@ -29,7 +29,7 @@
 //! [`horner`] combines the window sums from the highest window down with $w$
 //! doublings between them: $S = (\cdots(W_K 2^w + W_{K-1}) 2^w + \cdots) + W_0$.
 //! Serially, one [`WindowReducer`] serves every window in turn; with
-//! `multicore`, each window is its own Rayon task.
+//! `multicore`, at most one task per worker claims windows as it finishes them.
 //!
 //! # Memory
 //!
@@ -425,12 +425,9 @@ where
     )
 }
 
-/// Evaluates each signed-Booth window as its own Rayon task, then combines the
-/// ordered sums with one Horner fold. This keeps the expensive window
-/// reductions parallel, with work stealing, without duplicating the shift
-/// chain. Each task checks a reducer out for its window: a thread returns it
-/// before starting its next window, so consecutive windows on a thread reuse
-/// the same buffers.
+/// Runs at most one Rayon job per worker, claiming windows from a shared
+/// counter. Each job keeps its reducer across windows; the ordered window sums
+/// still enter the same Horner fold, and any failed window declines the MSM.
 #[cfg(feature = "multicore")]
 fn multiexp_parallel<C>(
     components: &[(SignedMagnitude, SignedMagnitude)],
@@ -442,15 +439,31 @@ where
     AffineBase<C>: CachedField,
 {
     let window_count = window_count(window_bits);
-    let window_sums: Option<Vec<C>> = (0..window_count)
+    let jobs = maybe_rayon::current_num_threads().min(window_count);
+    let next_window = core::sync::atomic::AtomicUsize::new(0);
+    let tasks: Vec<Option<Vec<(usize, C)>>> = (0..jobs)
         .into_par_iter()
-        .map(|window| {
+        .map(|_| {
             let mut reducer = Checkout::<AffineBase<C>>::take();
-            let buckets = reducer.fill_window(components, bases, window_bits, window)?;
-            Some(sum_buckets::<C>(buckets))
+            let mut sums = Vec::new();
+            loop {
+                let window = next_window.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                if window >= window_count {
+                    break;
+                }
+                let buckets = reducer.fill_window(components, bases, window_bits, window)?;
+                sums.push((window, sum_buckets::<C>(buckets)));
+            }
+            Some(sums)
         })
         .collect();
-    horner::<C>(window_bits, window_sums?.into_iter().rev().map(Some))
+    let mut window_sums = alloc::vec![C::identity(); window_count];
+    for task in tasks {
+        for (window, sum) in task? {
+            window_sums[window] = sum;
+        }
+    }
+    horner::<C>(window_bits, window_sums.into_iter().rev().map(Some))
 }
 
 /// Returns $\sum_c m_c Q_c = \sum_i k_i P_i$ for the GLV components of the
