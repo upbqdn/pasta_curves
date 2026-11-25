@@ -439,7 +439,7 @@ where
     AffineBase<C>: CachedField,
 {
     let window_count = window_count(window_bits);
-    let jobs = maybe_rayon::current_num_threads().min(window_count);
+    let jobs = super::plan::current_num_threads().min(window_count);
     let next_window = core::sync::atomic::AtomicUsize::new(0);
     let tasks: Vec<Option<Vec<(usize, C)>>> = (0..jobs)
         .into_par_iter()

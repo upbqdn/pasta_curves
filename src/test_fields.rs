@@ -456,6 +456,20 @@ fn partial_eq_matches_constant_time_equality() {
     });
 }
 
+#[test]
+fn partial_eq_checks_every_limb() {
+    use crate::fields::{Fp, Fq};
+
+    // Random residues almost never differ in exactly one limb.
+    for limb in 0..4 {
+        let a = [1, 2, 3, 4];
+        let mut b = a;
+        b[limb] ^= 1;
+        assert_ne!(Fp(a), Fp(b));
+        assert_ne!(Fq(a), Fq(b));
+    }
+}
+
 /// A canonical residue of the field `FIELDS[i]`, weighted toward the edges of `[0, p)`, where
 /// uniform sampling almost never lands. It is drawn from one of five families:
 ///
