@@ -148,6 +148,9 @@ mod private {
         /// as $(0, 0)$; `CurveAffine::coordinates` would return the same pair
         /// after a constant-time identity check.
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>);
+
+        /// Converts a public affine MSM base without a constant-time identity check.
+        fn affine_to_curve_vartime(point: &Self::AffineExt) -> Self;
     }
 
     #[cfg(feature = "glv")]
@@ -159,6 +162,10 @@ mod private {
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
             point.raw_xy()
         }
+
+        fn affine_to_curve_vartime(point: &Self::AffineExt) -> Self {
+            point.to_curve_vartime()
+        }
     }
 
     #[cfg(feature = "glv")]
@@ -169,6 +176,10 @@ mod private {
 
         fn affine_xy(point: &Self::AffineExt) -> (AffineBase<Self>, AffineBase<Self>) {
             point.raw_xy()
+        }
+
+        fn affine_to_curve_vartime(point: &Self::AffineExt) -> Self {
+            point.to_curve_vartime()
         }
     }
 }
@@ -853,7 +864,7 @@ where
     pub fn new(p: &C) -> Self {
         let proj = Self::window_proj(p);
         let mut affine = [C::AffineExt::identity(); 8];
-        C::batch_normalize(&proj, &mut affine);
+        C::batch_normalize_vartime(&proj, &mut affine);
         Self::from_window(&affine)
     }
 
@@ -875,7 +886,7 @@ where
         }
         // One inversion for the whole batch.
         let mut affine = alloc::vec![C::AffineExt::identity(); n * 8];
-        C::batch_normalize(&proj, &mut affine);
+        C::batch_normalize_vartime(&proj, &mut affine);
         affine.chunks_exact(8).map(Self::from_window).collect()
     }
 
@@ -1082,7 +1093,7 @@ where
     C: GlvParams,
 {
     let mut affine = alloc::vec![C::AffineExt::identity(); proj.len()];
-    C::batch_normalize(proj, &mut affine);
+    C::batch_normalize_vartime(proj, &mut affine);
     affine
 }
 
@@ -1345,6 +1356,34 @@ pub(crate) mod tests {
                 "batched table must act like solo"
             );
         }
+    }
+
+    #[test]
+    fn vartime_tables_match_constant_time_normalization() {
+        fn check<C: GlvParams>() {
+            let g = C::generator();
+            let samples = [C::identity(), g, -g, g.double(), g + g.double()];
+            for len in [0, 1, 2, 3, 8, 31, 32, 33] {
+                let points: Vec<_> = samples.iter().copied().cycle().take(len).collect();
+                let proj: Vec<_> = points.iter().flat_map(Table::window_proj).collect();
+                let mut expected = alloc::vec![C::AffineExt::identity(); proj.len()];
+                C::batch_normalize(&proj, &mut expected);
+                assert_eq!(normalize(&proj), expected);
+                let tables = Table::batch(&points);
+                for (point, (table, chunk)) in points
+                    .iter()
+                    .zip(tables.iter().zip(expected.chunks_exact(8)))
+                {
+                    let solo = Table::new(point);
+                    assert_eq!(table.t1.as_slice(), &chunk[..4]);
+                    assert_eq!(table.t2.as_slice(), &chunk[4..]);
+                    assert_eq!(solo.t1.as_slice(), &chunk[..4]);
+                    assert_eq!(solo.t2.as_slice(), &chunk[4..]);
+                }
+            }
+        }
+        check::<pallas::Point>();
+        check::<vesta::Point>();
     }
 
     /// Identity tables work both alone and alongside non-identity tables.

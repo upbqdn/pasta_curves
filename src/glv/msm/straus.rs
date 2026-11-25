@@ -34,13 +34,13 @@
 //! (`straus_multiexp_leaves`).
 
 use alloc::vec::Vec;
-use group::CurveAffine as _;
 #[cfg(feature = "multicore")]
 use maybe_rayon::prelude::*;
 
 #[cfg(any(feature = "multicore", doc))]
 use super::calibration::CALIBRATION;
-use crate::glv::{Decomposed, GlvParams, Recoding, Table, Wnaf4};
+use crate::glv::{Decomposed, GlvParams, Recoding, Table, Wnaf4, affine_xy};
+use ff::Field;
 
 /// Share the doubling ladder across all scalar/base pairs, reusing the
 /// upstream GLV decomposition and width-four split-wNAF tables unchanged.
@@ -57,11 +57,12 @@ where
     let mut points = Vec::with_capacity(bases.len());
     for (scalar, base) in scalars.iter().zip(bases) {
         let scalar = Decomposed::<C>::new(scalar);
-        if scalar.len == 0 || bool::from(base.is_identity()) {
+        let (x, y) = affine_xy::<C>(base);
+        if scalar.len == 0 || (x.is_zero_vartime() && y.is_zero_vartime()) {
             continue;
         }
         decomposed.push(scalar);
-        points.push(base.to_curve());
+        points.push(C::affine_to_curve_vartime(base));
     }
     if decomposed.is_empty() {
         return C::identity();
