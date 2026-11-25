@@ -915,7 +915,7 @@ macro_rules! new_curve_impl {
 
         impl $name_affine {
             // Only callers that already branch on point identity use this conversion.
-            pub(crate) fn to_curve_vartime(&self) -> $name {
+            pub(crate) fn to_curve_vartime(self) -> $name {
                 $name {
                     x: self.x,
                     y: self.y,
