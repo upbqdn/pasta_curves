@@ -55,7 +55,7 @@ mod affine;
 mod cache;
 
 use alloc::vec::Vec;
-use group::CurveAffine as _;
+use ff::Field as _;
 #[cfg(feature = "multicore")]
 use maybe_rayon::prelude::*;
 
@@ -493,7 +493,7 @@ where
         x,
         endo_x: phi_x::<C>(x),
         y,
-        identity: bool::from(base.is_identity()),
+        identity: x.is_zero_vartime() && y.is_zero_vartime(),
     }
 }
 
